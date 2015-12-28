@@ -43,19 +43,6 @@ enum {
 
 typedef u32 kbasep_js_release_result;
 
-const int kbasep_js_atom_priority_to_relative[BASE_JD_NR_PRIO_LEVELS] = {
-	KBASE_JS_ATOM_SCHED_PRIO_MIN+1, /* BASE_JD_PRIO_MEDIUM */
-	KBASE_JS_ATOM_SCHED_PRIO_MIN+0, /* BASE_JD_PRIO_HIGH */
-	KBASE_JS_ATOM_SCHED_PRIO_MIN+2  /* BASE_JD_PRIO_LOW */
-};
-
-const base_jd_prio kbasep_js_relative_priority_to_atom[KBASE_JS_ATOM_SCHED_PRIO_RANGE] = {
-	BASE_JD_PRIO_HIGH,   /* KBASE_JS_ATOM_SCHED_PRIO_MIN+0 */
-	BASE_JD_PRIO_MEDIUM, /* KBASE_JS_ATOM_SCHED_PRIO_MIN+1 */
-	BASE_JD_PRIO_LOW     /* KBASE_JS_ATOM_SCHED_PRIO_MIN+2 */
-};
-
-
 /*
  * Private function prototypes
  */
@@ -756,7 +743,7 @@ STATIC void kbasep_js_runpool_evict_next_jobs(struct kbase_device *kbdev, struct
 }
 
 /**
- * Fast start a higher priority context
+ * Fast start a higher priority job
  * If the runpool is full, the lower priority contexts with no running jobs
  * will be evicted from the runpool
  *
@@ -954,14 +941,14 @@ mali_bool kbasep_js_add_job(struct kbase_context *kctx, struct kbase_jd_atom *at
 	}
 	mutex_unlock(&js_kctx_info->ctx.jsctx_mutex);
 
-	/* If the runpool is full and this context has a higher priority than a
-	 * non-running context in the runpool - evict it so this higher
-	 * priority context starts faster.  Fast-starting requires the
-	 * jsctx_mutex to be dropped, because it works on multiple ctxs
+	/* If the runpool is full and this job has a higher priority than the
+	 * non-running job in the runpool - evict it so this higher priority job
+	 * starts faster.  Fast-starting requires the jsctx_mutex to be dropped,
+	 * because it works on multiple ctxs
 	 *
-	 * Note: If the context is being killed with kbase_job_zap_context(),
-	 * then kctx can't disappear after the jsctx_mutex was dropped. This is
-	 * because the caller holds kctx->jctx.lock */
+	 * Note: If the context is being killed with kbase_job_zap_context(), then
+	 * kctx can't disappear after the jsctx_mutex was dropped. This is because
+	 * the caller holds kctx->jctx.lock */
 	if (policy_queue_updated)
 		kbasep_js_runpool_attempt_fast_start_ctx(kbdev, kctx);
 
@@ -1005,7 +992,6 @@ void kbasep_js_remove_cancelled_job(struct kbase_device *kbdev, struct kbase_con
 
 	js_devdata = &kbdev->js_data;
 
-	mutex_lock(&js_devdata->runpool_mutex);
 	kbasep_js_atom_retained_state_copy(&katom_retained_state, katom);
 	kbasep_js_remove_job(kbdev, kctx, katom);
 
@@ -1020,7 +1006,6 @@ void kbasep_js_remove_cancelled_job(struct kbase_device *kbdev, struct kbase_con
 	attr_state_changed = kbasep_js_ctx_attr_ctx_release_atom(kbdev, kctx, &katom_retained_state);
 
 	spin_unlock_irqrestore(&js_devdata->runpool_irq.lock, flags);
-	mutex_unlock(&js_devdata->runpool_mutex);
 
 	if (attr_state_changed != MALI_FALSE) {
 		/* A change in runpool ctx attributes might mean we can run more jobs
@@ -1323,19 +1308,6 @@ void kbasep_js_runpool_requeue_or_kill_ctx(struct kbase_device *kbdev, struct kb
 		/* In all cases where we had a pm active refcount, release it */
 		kbase_pm_context_idle(kbdev);
 	}
-
-#ifdef SEPERATED_UTILIZATION
-	if (kbdev->js_data.nr_all_contexts_running == 0 ||
-		(kbdev->js_data.nr_all_contexts_running == 1 && kbdev->hwcnt.kctx != NULL)) {
-		/* Either:
-		* a) the last context has just finished (regardless of if hwcnt enabled)
-		* b) or, HW counter collection active, and there's one
-		* context active (which must be the HW counting context)
-		*
-		* Hence, we record going idle */
-		kbase_pm_record_gpu_state(kbdev, MALI_FALSE);
-	}
-#endif
 }
 
 void kbasep_js_runpool_release_ctx_and_katom_retained_state(struct kbase_device *kbdev, struct kbase_context *kctx, struct kbasep_js_atom_retained_state *katom_retained_state)
@@ -1832,15 +1804,6 @@ void kbasep_js_try_schedule_head_ctx(struct kbase_device *kbdev)
 
 	pm_active_err = kbase_pm_context_active_handle_suspend(kbdev, KBASE_PM_SUSPEND_HANDLER_DONT_INCREASE);
 
-#ifdef SEPERATED_UTILIZATION
-	if (kbdev->hwcnt.kctx != head_kctx) {
-		/* Not a context which runs HW counters collection
-		* so do the recording of GPU being active
-		*/
-		kbase_pm_record_gpu_state(kbdev, MALI_TRUE);
-	}
-#endif
-
 	/*
 	 * Atomic transaction on the Context and Run Pool begins
 	 */
@@ -2043,10 +2006,6 @@ void kbasep_js_release_privileged_ctx(struct kbase_device *kbdev, struct kbase_c
 	kbasep_js_runpool_release_ctx(kbdev, kctx);
 }
 
-#if defined(CL_UTILIZATION_BOOST_BY_TIME_WEIGHT)
-#define KBASE_PM_TIME_SHIFT			8
-#endif
-
 void kbasep_js_job_done_slot_irq(struct kbase_jd_atom *katom, int slot_nr,
 		ktime_t *end_timestamp, kbasep_js_atom_done_code done_code)
 {
@@ -2090,16 +2049,6 @@ void kbasep_js_job_done_slot_irq(struct kbase_jd_atom *katom, int slot_nr,
 		tick_diff = ktime_sub(*end_timestamp, katom->start_timestamp);
 
 		microseconds_spent = ktime_to_ns(tick_diff);
-
-#if defined(CL_UTILIZATION_BOOST_BY_TIME_WEIGHT)
-		if (katom->core_req & BASE_JD_REQ_ONLY_COMPUTE)
-			atomic_add((microseconds_spent >> KBASE_PM_TIME_SHIFT), &kbdev->pm.metrics.time_compute_jobs);
-		else if (katom->core_req & BASE_JD_REQ_FS)
-			atomic_add((microseconds_spent >> KBASE_PM_TIME_SHIFT), &kbdev->pm.metrics.time_fragment_jobs);
-		else if (katom->core_req & BASE_JD_REQ_CS)
-			atomic_add((microseconds_spent >> KBASE_PM_TIME_SHIFT), &kbdev->pm.metrics.time_vertex_jobs);
-#endif
-
 		do_div(microseconds_spent, 1000);
 
 		/* Round up time spent to the minimum timer resolution */

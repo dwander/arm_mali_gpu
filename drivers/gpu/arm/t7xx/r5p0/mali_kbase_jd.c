@@ -32,9 +32,6 @@
 #endif				/* CONFIG_UMP */
 #include <linux/random.h>
 
-/*MALI_SEC */
-#include <linux/exynos_ion.h>
-
 #define beenthere(kctx, f, a...)  dev_dbg(kctx->kbdev->dev, "%s:" f, __func__, ##a)
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 8, 0)
@@ -243,8 +240,6 @@ static mali_error kbase_jd_umm_map(struct kbase_context *kctx, struct kbase_va_r
 out:
 	if (MALI_ERROR_NONE != err) {
 		dma_buf_unmap_attachment(reg->alloc->imported.umm.dma_attachment, reg->alloc->imported.umm.sgt, DMA_BIDIRECTIONAL);
-		/* SLSI */
-		exynos_ion_sync_dmabuf_for_device(kctx->kbdev->dev, reg->alloc->imported.umm.dma_buf, reg->alloc->imported.umm.dma_buf->size, DMA_BIDIRECTIONAL);
 		reg->alloc->imported.umm.sgt = NULL;
 	}
 
@@ -540,7 +535,7 @@ static mali_error kbase_jd_pre_external_resources(struct kbase_jd_atom *katom, c
 						katom->kctx,
 						katom->extres[res_no].gpu_address);
 
-				if (reg && reg->alloc == alloc)
+				if (reg && reg->alloc == alloc) 
 					kbase_mmu_teardown_pages(katom->kctx,
 							reg->start_pfn,
 					    		kbase_reg_current_backed_size(reg));
@@ -571,7 +566,7 @@ STATIC INLINE void jd_resolve_dep(struct list_head *out_list, struct kbase_jd_at
 		struct kbase_jd_atom *dep_atom;
 		u8 dep_type;
 
-		dep_atom = list_entry(katom->dep_head[d].next,
+		dep_atom = list_entry(katom->dep_head[d].next, 
 				struct kbase_jd_atom, dep_item[d]);
 		dep_type = kbase_jd_katom_dep_type(&dep_atom->dep[d]);
 
@@ -733,7 +728,7 @@ mali_bool jd_done_nolock(struct kbase_jd_atom *katom)
 			struct kbase_jd_atom *node;
 
 			node = list_entry(runnable_jobs.prev, struct kbase_jd_atom, dep_item[0]);
-
+			
 			list_del(runnable_jobs.prev);
 
 			KBASE_DEBUG_ASSERT(node->status != KBASE_JD_ATOM_STATE_UNUSED);
@@ -845,7 +840,6 @@ mali_bool jd_submit_atom(struct kbase_context *kctx,
 	base_jd_core_req core_req;
 	int queued = 0;
 	int i;
-	int sched_prio;
 	mali_bool ret;
 
 	/* Update the TOTAL number of jobs. This includes those not tracked by
@@ -865,6 +859,7 @@ mali_bool jd_submit_atom(struct kbase_context *kctx,
 	katom->jc = user_atom->jc;
 	katom->coreref_state = KBASE_ATOM_COREREF_STATE_NO_CORES_REQUESTED;
 	katom->core_req = core_req;
+	katom->nice_prio = user_atom->prio;
 	katom->atom_flags = 0;
 	katom->retry_count = 0;
 
@@ -966,11 +961,31 @@ mali_bool jd_submit_atom(struct kbase_context *kctx,
 		goto out;
 	}
 
-	/* For invalid priority, be most lenient and choose the default */
-	sched_prio = kbasep_js_atom_prio_to_sched_prio(user_atom->prio);
-	if (sched_prio == KBASE_JS_ATOM_SCHED_PRIO_INVALID)
-		sched_prio = KBASE_JS_ATOM_SCHED_PRIO_DEFAULT;
-	katom->sched_priority = sched_prio;
+	/*
+	 * If the priority is increased we need to check the caller has security caps to do this, if
+	 * priority is decreased then this is ok as the result will have no negative impact on other
+	 * processes running.
+	 */
+	if (0 > katom->nice_prio) {
+		mali_bool access_allowed;
+
+		access_allowed = kbase_security_has_capability(kctx,
+				KBASE_SEC_MODIFY_PRIORITY, KBASE_SEC_FLAG_NOAUDIT);
+
+		if (!access_allowed) {
+			/* For unprivileged processes - a negative priority is interpreted as zero */
+			katom->nice_prio = 0;
+		}
+	}
+
+	/* Scale priority range to use NICE range */
+	if (katom->nice_prio) {
+		/* Remove sign for calculation */
+		int nice_priority = katom->nice_prio + 128;
+
+		/* Fixed point maths to scale from ..255 to 0..39 (NICE range with +20 offset) */
+		katom->nice_prio = (((20 << 16) / 128) * nice_priority) >> 16;
+	}
 
 	if (katom->core_req & BASE_JD_REQ_EXTERNAL_RESOURCES) {
 		/* handle what we need to do to access the external resources */
@@ -1161,7 +1176,7 @@ mali_error kbase_jd_submit(struct kbase_context *kctx,
 			 * complete
 			 */
 			mutex_unlock(&jctx->lock);
-
+		
 			/* This thread will wait for the atom to complete. Due
 			 * to thread scheduling we are not sure that the other
 			 * thread that owns the atom will also schedule the

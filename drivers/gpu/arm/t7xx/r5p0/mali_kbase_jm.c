@@ -31,37 +31,6 @@
 
 #include "mali_kbase_jm.h"
 
-#ifdef SLSI_INTEGRATION
-struct gpu_status_dump {
-	int flag;
-	int gpu_irq_rawstat;
-	int gpu_status;
-	int job_irq_rawstat;
-	int job_irq_js_state;
-	int job_irq_throttle;
-	int js0_status;
-	int js0_head_lo;
-	int js1_status;
-	int js1_head_lo;
-	int js2_status;
-	int js2_head_lo;
-	int mmu_irq_rawstat;
-	int gpu_faultstatus;
-	int gpu_irq_mask;
-	int job_irq_mask;
-	int mmu_irq_mask;
-	int pwr_override0;
-	int pwr_override1;
-	int shader_config;
-	int l2_mmu_config;
-	struct timeval current_time;
-};
-
-static struct gpu_status_dump gpu_dump[2];
-#endif
-/* S.LSI intergration */
-extern int gpu_register_dump(void);
-
 #define beenthere(kctx, f, a...)  dev_dbg(kctx->kbdev->dev, "%s:" f, __func__, ##a)
 
 #ifdef CONFIG_MALI_DEBUG_SHADER_SPLIT_FS
@@ -73,11 +42,6 @@ u64 mali_js2_affinity_mask = 0xFFFFFFFFFFFFFFFFULL;
 #if KBASE_GPU_RESET_EN
 static void kbasep_try_reset_gpu_early(struct kbase_device *kbdev);
 #endif /* KBASE_GPU_RESET_EN */
-
-#if !KBASE_DEBUG_DISABLE_ASSERTS
-static void atom_prio_validate_callback(struct kbase_device *kbdev,
-		struct kbase_jd_atom *enumerated_katom, int slot, void *private);
-#endif /* !KBASE_DEBUG_DISABLE_ASSERTS */
 
 #ifdef CONFIG_GPU_TRACEPOINTS
 static char *kbasep_make_job_slot_string(int js, char *js_string)
@@ -221,13 +185,6 @@ void kbase_job_submit_nolock(struct kbase_device *kbdev, struct kbase_jd_atom *k
 	 * queue, which I hope will be enough...
 	 */
 	kbasep_jm_enqueue_submit_slot(&jm_slots[js], katom);
-
-#if !KBASE_DEBUG_DISABLE_ASSERTS
-	/* Validate currently running atom priorities on this context */
-	kbase_jm_enumerate_running_atoms_locked(kbdev,
-			&atom_prio_validate_callback, katom);
-#endif /* !KBASE_DEBUG_DISABLE_ASSERTS */
-
 	kbase_job_hw_submit(kbdev, katom, js);
 }
 
@@ -882,57 +839,6 @@ static void kbasep_job_slot_soft_or_hard_stop(struct kbase_device *kbdev, struct
 	KBASE_TIMELINE_TRY_SOFT_STOP(kctx, js, 0);
 }
 
-#if !KBASE_DEBUG_DISABLE_ASSERTS
-/**
- * Callback to kbase_jm_enumerate_running_atoms_locked() for validating atom
- * priorities within a context.
- *
- * The decisions must be kept in sync with the soft/hard-stop code.
- */
-static void atom_prio_validate_callback(struct kbase_device *kbdev,
-		struct kbase_jd_atom *enumerated_katom, int slot, void *private)
-{
-	struct kbase_jd_atom *target_katom = (struct kbase_jd_atom *)private;
-	base_jd_core_req target_frag_bit = target_katom->core_req & BASE_JD_REQ_FS;
-	base_jd_core_req enumerated_frag_bit = enumerated_katom->core_req & BASE_JD_REQ_FS;
-
-	KBASE_DEBUG_ASSERT(target_katom);
-
-	/* Only interested in atoms from the same context */
-	if (target_katom->kctx != enumerated_katom->kctx)
-		return;
-
-	/* 'Dummy workaround' jobs aren't a problem */
-	if (kbasep_jm_is_dummy_workaround_job(kbdev, enumerated_katom))
-		return;
-
-	/* The atom should be of the same 'type' */
-	if (!DEFAULT_ATOM_PRIORITY_BLOCKS_ENTIRE_GPU &&
-			target_frag_bit != enumerated_frag_bit)
-		return;
-
-	/* It's ok for low priority atoms to have been soft-stopped, or they
-	 * can't be soft-stopped */
-	if ((enumerated_katom->atom_flags & KBASE_KATOM_FLAG_BEEN_SOFT_STOPPPED)
-	    || !kbasep_soft_stop_allowed(kbdev, enumerated_katom->core_req))
-		return;
-
-	/* As above, for hard-stopped */
-	if ((enumerated_katom->atom_flags & KBASE_KATOM_FLAG_BEEN_HARD_STOPPED)
-	    || !kbasep_hard_stop_allowed(kbdev, enumerated_katom->core_req))
-		return;
-
-	/* Otherwise, the priority must be correct: only atoms at the target
-	 * priority (for this type of atom) are allowed:
-	 * - New low priority atoms must be held off  until higher priority
-	 *   atoms finish
-	 * - New higher priority atoms must have initiated a stop on lower
-	 *   priority atoms */
-	KBASE_DEBUG_ASSERT(enumerated_katom->sched_priority == target_katom->sched_priority);
-}
-#endif /* !KBASE_DEBUG_DISABLE_ASSERTS */
-
-
 void kbase_job_kill_jobs_from_context(struct kbase_context *kctx)
 {
 	unsigned long flags;
@@ -1241,65 +1147,9 @@ void kbase_job_check_leave_disjoint(struct kbase_device *kbdev,
 }
 
 
-#ifdef SLSI_INTEGRATION
-void debug_dump_registers(struct kbase_device *kbdev, struct gpu_status_dump *gpu_register)
-{
-	gpu_register->flag = 1;
-	gpu_register->gpu_irq_rawstat = kbase_reg_read(kbdev, GPU_CONTROL_REG(GPU_IRQ_RAWSTAT), NULL);
-	gpu_register->gpu_status = kbase_reg_read(kbdev, GPU_CONTROL_REG(GPU_STATUS), NULL);
-	gpu_register->job_irq_rawstat = kbase_reg_read(kbdev, JOB_CONTROL_REG(JOB_IRQ_RAWSTAT), NULL);
-	gpu_register->job_irq_js_state = kbase_reg_read(kbdev, JOB_CONTROL_REG(JOB_IRQ_JS_STATE), NULL);
-	gpu_register->job_irq_throttle = kbase_reg_read(kbdev, JOB_CONTROL_REG(JOB_IRQ_THROTTLE), NULL);
-
-	gpu_register->js0_status  = kbase_reg_read(kbdev, JOB_SLOT_REG(0, JS_STATUS), NULL);
-	gpu_register->js0_head_lo = kbase_reg_read(kbdev, JOB_SLOT_REG(0, JS_HEAD_LO), NULL);
-	gpu_register->js1_status  = kbase_reg_read(kbdev, JOB_SLOT_REG(1, JS_STATUS), NULL);
-	gpu_register->js1_head_lo = kbase_reg_read(kbdev, JOB_SLOT_REG(1, JS_HEAD_LO), NULL);
-	gpu_register->js2_status  = kbase_reg_read(kbdev, JOB_SLOT_REG(2, JS_STATUS), NULL);
-	gpu_register->js2_head_lo = kbase_reg_read(kbdev, JOB_SLOT_REG(2, JS_HEAD_LO), NULL);
-	gpu_register->mmu_irq_rawstat = kbase_reg_read(kbdev, MMU_REG(MMU_IRQ_RAWSTAT), NULL);
-	gpu_register->gpu_faultstatus = kbase_reg_read(kbdev, GPU_CONTROL_REG(GPU_FAULTSTATUS), NULL);
-	gpu_register->gpu_irq_mask = kbase_reg_read(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK), NULL);
-	gpu_register->job_irq_mask = kbase_reg_read(kbdev, JOB_CONTROL_REG(JOB_IRQ_MASK), NULL);
-	gpu_register->mmu_irq_mask = kbase_reg_read(kbdev, MMU_REG(MMU_IRQ_MASK), NULL);
-	gpu_register->pwr_override0 = kbase_reg_read(kbdev, GPU_CONTROL_REG(PWR_OVERRIDE0), NULL);
-	gpu_register->pwr_override1 = kbase_reg_read(kbdev, GPU_CONTROL_REG(PWR_OVERRIDE1), NULL);
-	gpu_register->shader_config = kbase_reg_read(kbdev, GPU_CONTROL_REG(SHADER_CONFIG), NULL);
-	gpu_register->l2_mmu_config = kbase_reg_read(kbdev, GPU_CONTROL_REG(L2_MMU_CONFIG), NULL);
-
-	do_gettimeofday(&gpu_register->current_time);
-
-	dev_err(kbdev->dev, "Register state:");
-	dev_err(kbdev->dev, "  GPU_IRQ_RAWSTAT=0x%08x GPU_STATUS=0x%08x",
-		gpu_register->gpu_irq_rawstat, gpu_register->gpu_status);
-	dev_err(kbdev->dev, "  JOB_IRQ_RAWSTAT=0x%08x JOB_IRQ_JS_STATE=0x%08x JOB_IRQ_THROTTLE=0x%08x",
-		gpu_register->job_irq_rawstat, gpu_register->job_irq_js_state, gpu_register->job_irq_throttle);
-	dev_err(kbdev->dev, "  JS0_STATUS=0x%08x      JS0_HEAD_LO=0x%08x",
-		gpu_register->js0_status, gpu_register->js0_head_lo);
-	dev_err(kbdev->dev, "  JS1_STATUS=0x%08x      JS1_HEAD_LO=0x%08x",
-		gpu_register->js1_status, gpu_register->js1_head_lo);
-	dev_err(kbdev->dev, "  JS2_STATUS=0x%08x      JS2_HEAD_LO=0x%08x",
-		gpu_register->js2_status, gpu_register->js2_head_lo);
-	dev_err(kbdev->dev, "  MMU_IRQ_RAWSTAT=0x%08x GPU_FAULTSTATUS=0x%08x",
-		gpu_register->mmu_irq_rawstat, gpu_register->gpu_faultstatus);
-	dev_err(kbdev->dev, "  GPU_IRQ_MASK=0x%08x    JOB_IRQ_MASK=0x%08x     MMU_IRQ_MASK=0x%08x",
-		gpu_register->gpu_irq_mask, gpu_register->job_irq_mask, gpu_register->mmu_irq_mask);
-	dev_err(kbdev->dev, "  PWR_OVERRIDE0=0x%08x   PWR_OVERRIDE1=0x%08x",
-		gpu_register->pwr_override0, gpu_register->pwr_override1);
-	dev_err(kbdev->dev, "  SHADER_CONFIG=0x%08x   L2_MMU_CONFIG=0x%08x",
-		gpu_register->shader_config, gpu_register->l2_mmu_config);
-}
-#endif
 #if KBASE_GPU_RESET_EN
-/* SLSI */
-void kbase_debug_dump_registers(struct kbase_device *kbdev)
+static void kbase_debug_dump_registers(struct kbase_device *kbdev)
 {
-#ifdef SLSI_INTEGRATION
-	if (gpu_dump[0].flag == 0)
-		debug_dump_registers(kbdev, &gpu_dump[0]);
-	else
-		debug_dump_registers(kbdev, &gpu_dump[1]);
-#else
 	int i;
 	dev_err(kbdev->dev, "Register state:");
 	dev_err(kbdev->dev, "  GPU_IRQ_RAWSTAT=0x%08x GPU_STATUS=0x%08x",
@@ -1329,7 +1179,6 @@ void kbase_debug_dump_registers(struct kbase_device *kbdev)
 	dev_err(kbdev->dev, "  SHADER_CONFIG=0x%08x   L2_MMU_CONFIG=0x%08x",
 		kbase_reg_read(kbdev, GPU_CONTROL_REG(SHADER_CONFIG), NULL),
 		kbase_reg_read(kbdev, GPU_CONTROL_REG(L2_MMU_CONFIG), NULL));
-#endif
 }
 
 void kbasep_reset_timeout_worker(struct work_struct *data)
@@ -1396,10 +1245,6 @@ void kbasep_reset_timeout_worker(struct work_struct *data)
 	/* Output the state of some interesting registers to help in the
 	 * debugging of GPU resets */
 	kbase_debug_dump_registers(kbdev);
-
-	/* S.LSI intergration */
-	gpu_register_dump();
-	KBASE_TRACE_DUMP(kbdev);
 
 	bckp_state = kbdev->hwcnt.state;
 	kbdev->hwcnt.state = KBASE_INSTR_STATE_RESETTING;
@@ -1685,33 +1530,3 @@ void kbase_reset_gpu_locked(struct kbase_device *kbdev)
 	kbasep_try_reset_gpu_early_locked(kbdev);
 }
 #endif /* KBASE_GPU_RESET_EN */
-
-void kbase_jm_enumerate_running_atoms_locked(struct kbase_device *kbdev,
-		kbase_jm_running_atoms_cb *callback, void *private)
-{
-	int slot_idx;
-	lockdep_assert_held(&kbdev->js_data.runpool_irq.lock);
-
-	for (slot_idx = 0;
-	     slot_idx < kbdev->gpu_props.num_job_slots;
-	     slot_idx++) {
-		struct kbase_jm_slot *slot = &kbdev->jm_slots[slot_idx];
-		unsigned int jobs_submitted = kbasep_jm_nr_jobs_submitted(slot);
-		unsigned int slot_peek_idx;
-
-		if (jobs_submitted > JM_SLOT_MAX_JOB_SUBMIT_REGS)
-			slot_peek_idx = jobs_submitted - JM_SLOT_MAX_JOB_SUBMIT_REGS;
-		else
-			slot_peek_idx = 0;
-
-		for (; slot_peek_idx < jobs_submitted; ++slot_peek_idx) {
-			struct kbase_jd_atom *enumerated_katom;
-
-			enumerated_katom = kbasep_jm_peek_idx_submit_slot(slot,
-					 slot_peek_idx);
-
-			callback(kbdev, enumerated_katom, slot_idx, private);
-		}
-
-	}
-}

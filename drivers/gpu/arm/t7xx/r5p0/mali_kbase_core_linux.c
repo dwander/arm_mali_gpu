@@ -61,8 +61,7 @@
 #include <linux/compat.h>	/* is_compat_task */
 #include <linux/version.h>
 #include <mali_kbase_hw.h>
-#include <platform/mali_kbase_platform.h>
-#include <platform/gpu_hwcnt.h>
+#include <platform/mali_kbase_platform_common.h>
 #ifdef CONFIG_SYNC
 #include <mali_kbase_sync.h>
 #endif /* CONFIG_SYNC */
@@ -70,16 +69,7 @@
 #include <linux/devfreq.h>
 #endif /* CONFIG_PM_DEVFREQ */
 #include <linux/clk.h>
-#if SLSI_INTEGRATION
-#include <linux/pm_qos.h>
-#include <linux/sched.h>
-#include <platform/gpu_dvfs_handler.h>
-extern int set_hmp_boost(int enable);
-#endif
 
-#ifdef CONFIG_SENSORS_SEC_THERMISTOR
-extern int sec_therm_get_ap_temperature(void);
-#endif
 /*
  * This file is included since when we support device tree we don't
  * use the platform fake code for registering the kbase config attributes.
@@ -341,11 +331,6 @@ static mali_error kbase_external_buffer_lock(struct kbase_context *kctx, struct 
 }
 #endif /* CONFIG_KDS */
 
-#ifdef CONFIG_USE_VSYNC_SKIP
-void s3c_fb_extra_vsync_wait_set(int);
-void s3c_fb_extra_vsync_wait_add(int);
-#endif
-
 static mali_error kbase_dispatch(struct kbase_context *kctx, void * const args, u32 args_size)
 {
 	struct kbase_device *kbdev;
@@ -442,9 +427,6 @@ static mali_error kbase_dispatch(struct kbase_context *kctx, void * const args, 
 			reg = kbase_mem_alloc(kctx, mem->va_pages, mem->commit_pages, mem->extent, &mem->flags, &mem->gpu_va, &mem->va_alignment);
 			if (!reg)
 				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
-			else if (mem->sec_flag)
-				kctx->kbdev->hwcnt.phy_addr = reg->alloc->pages[0];
-
 			break;
 		}
 	case KBASE_FUNC_MEM_IMPORT:
@@ -685,76 +667,7 @@ copy_failed:
 				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
 			break;
 		}
-#if SLSI_INTEGRATION
-	case KBASE_FUNC_HWCNT_UTIL_SETUP:
-	{
-		struct kbase_uk_hwcnt_setup *setup = args;
 
-		if (sizeof(*setup) != args_size)
-			goto bad_size;
-
-		if (MALI_ERROR_NONE != kbase_instr_hwcnt_util_setup(kctx, setup))
-			ukh->ret = MALI_ERROR_FUNCTION_FAILED;
-		break;
-	}
-
-	case KBASE_FUNC_HWCNT_GPR_DUMP:
-		{
-			struct kbase_uk_hwcnt_gpr_dump *dump = args;
-
-			if (sizeof(*dump) != args_size)
-				goto bad_size;
-
-			if (MALI_ERROR_NONE != kbase_instr_hwcnt_gpr_dump(kctx, dump))
-				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
-			break;
-		}
-
-	case KBASE_FUNC_TMU_SKIP:
-		{
-#ifdef CONFIG_SENSORS_SEC_THERMISTOR
-			struct kbase_uk_tmu_skip *tskip = args;
-			int thermistor = sec_therm_get_ap_temperature();
-#ifdef CONFIG_USE_VSYNC_SKIP
-			u32 i, t_index = tskip->num_ratiometer;
-
-			for (i = 0; i < tskip->num_ratiometer; i++)
-				if (thermistor >= tskip->temperature[i])
-					t_index = i;
-
-			if (t_index < tskip->num_ratiometer) {
-				s3c_fb_extra_vsync_wait_add(tskip->skip_count[t_index]);
-				ukh->ret = MALI_ERROR_NONE;
-			} else {
-				s3c_fb_extra_vsync_wait_set(0);
-				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
-			}
-
-#endif /* CONFIG_USE_VSYNC_SKIP */
-#endif /* CONFIG_SENSORS_SEC_THERMISTOR */
-			break;
-		}
-
-	case KBASE_FUNC_VSYNC_SKIP:
-		{
-			struct kbase_uk_vsync_skip *vskip = args;
-
-			if (sizeof(*vskip) != args_size)
-				goto bad_size;
-#ifdef CONFIG_USE_VSYNC_SKIP
-			/* increment vsync skip variable that is used in fimd driver */
-			KBASE_TRACE_ADD_EXYNOS(kbdev, LSI_HWCNT_VSYNC_SKIP, NULL, NULL, 0u, vskip->skip_count);
-
-			if (vskip->skip_count == 0) {
-				s3c_fb_extra_vsync_wait_set(0);
-			} else {
-				s3c_fb_extra_vsync_wait_add(vskip->skip_count);
-			}
-#endif /* CONFIG_USE_VSYNC_SKIP */
-			break;
-		}
-
-#endif
 	case KBASE_FUNC_HWCNT_DUMP:
 		{
 			/* args ignored */
@@ -978,18 +891,6 @@ copy_failed:
 
 			break;
 		}
-#if SLSI_INTEGRATION
-	case KBASE_FUNC_CREATE_SURFACE:
-		{
-			kbase_mem_set_max_size(kctx);
-			break;
-		}
-	case KBASE_FUNC_DESTROY_SURFACE:
-		{
-			kbase_mem_free_list_cleanup(kctx);
-			break;
-		}
-#endif
 
 	case KBASE_FUNC_DEBUGFS_MEM_PROFILE_ADD:
 		{
@@ -1027,44 +928,6 @@ copy_failed:
 
 			break;
 		}
-
-#if SLSI_INTEGRATION
-	case KBASE_FUNC_SET_MIN_LOCK :
-		{
-			if (!kctx->ctx_need_qos) {
-				kctx->ctx_need_qos = true;
-				set_hmp_boost(1);
-				set_hmp_aggressive_up_migration(true);
-				set_hmp_aggressive_yield(true);
-#ifdef CONFIG_MALI_DVFS
-				gpu_dvfs_boost_lock(GPU_DVFS_BOOST_SET);
-#endif /* CONFIG_MALI_DVFS */
-			}
-			break;
-		}
-
-	case KBASE_FUNC_UNSET_MIN_LOCK :
-		{
-			if (kctx->ctx_need_qos) {
-				kctx->ctx_need_qos = false;
-				set_hmp_boost(0);
-				set_hmp_aggressive_up_migration(false);
-				set_hmp_aggressive_yield(false);
-#ifdef CONFIG_MALI_DVFS
-				gpu_dvfs_boost_lock(GPU_DVFS_BOOST_UNSET);
-#endif /* CONFIG_MALI_DVFS */
-			}
-			break;
-		}
-
-	case KBASE_FUNC_UNSET_GPU_MIN_LOCK :
-		{
-#ifdef CONFIG_MALI_DVFS
-			gpu_dvfs_boost_lock(GPU_DVFS_BOOST_GPU_UNSET);
-#endif /* CONFIG_MALI_DVFS */
-			break;
-		}
-#endif /* SLSI_INTEGRATION */
 
 	default:
 		dev_err(kbdev->dev, "unknown ioctl %u", id);
@@ -1199,8 +1062,7 @@ static int kbase_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-/* SLSI */
-#define CALL_MAX_SIZE (KBASE_FUNC_END - 1)
+#define CALL_MAX_SIZE 536
 
 static long kbase_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
@@ -1911,9 +1773,6 @@ static ssize_t set_policy(struct device *dev, struct device_attribute *attr, con
 	}
 
 	kbase_pm_set_policy(kbdev, new_policy);
-#if SLSI_INTEGRATION
-	kbdev->hwcnt.prev_policy = new_policy;
-#endif
 
 	return count;
 }
@@ -2888,10 +2747,6 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 		/* intialise the kctx list */
 		mutex_init(&kbdev->kctx_list_lock);
 		INIT_LIST_HEAD(&kbdev->kctx_list);
-
-#if SLSI_INTEGRATION
-		exynos_hwcnt_init(kbdev);
-#endif
 		return 0;
 	} else {
 		/* Failed to power up the GPU. */
@@ -2978,16 +2833,6 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 	return err;
 }
 
-#ifdef CONFIG_OF
-static const struct of_device_id exynos_mali_match[] = {
-	{
-		.compatible = "arm,mali",
-	},
-	{},
-};
-
-MODULE_DEVICE_TABLE(of, exynos_mali_match);
-#endif
 
 static int kbase_platform_device_probe(struct platform_device *pdev)
 {
@@ -2997,7 +2842,6 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 	int err;
 	int i;
 	struct mali_base_gpu_core_props *core_props;
-	struct exynos_context *platform;
 #ifdef CONFIG_MALI_NO_MALI
 	mali_error mali_err;
 #endif /* CONFIG_MALI_NO_MALI */
@@ -3013,12 +2857,6 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 			attribute_count * sizeof(config->attributes[0]));
 	if (err)
 		return err;
-#else
-	/* Call any hooks required for platform initialization at this stage */
-	err = kbase_platform_early_init(pdev);
-	if (err) {
-		return err;
-	}
 #endif /* CONFIG_MALI_PLATFORM_FAKE */
 #endif /* CONFIG_OF */
 
@@ -3065,8 +2903,8 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 			goto out_free_dev;
 		}
 
-#if 0 /* SLSI */ /*#ifdef CONFIG_OF*/
-		if (!strcmp(irq_res->name, "JOB"))
+#ifdef CONFIG_OF
+		if (!strcmp(irq_res->name, "JOB")) {
 			irqtag = JOB_IRQ_TAG;
 		} else if (!strcmp(irq_res->name, "MMU")) {
 			irqtag = MMU_IRQ_TAG;
@@ -3140,12 +2978,10 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 		goto out_debugfs_remove;
 	}
 
-	platform = (struct exynos_context *) kbdev->platform_context;
-
 	/* obtain min/max configured gpu frequencies */
 	core_props = &(kbdev->gpu_props.props.core_props);
-	core_props->gpu_freq_khz_min = platform->gpu_min_clock * 1000;
-	core_props->gpu_freq_khz_max = platform->gpu_max_clock * 1000;
+	core_props->gpu_freq_khz_min = GPU_FREQ_KHZ_MIN;
+	core_props->gpu_freq_khz_max = GPU_FREQ_KHZ_MAX;
 	kbdev->gpu_props.irq_throttle_time_us = DEFAULT_IRQ_THROTTLE_TIME_US;
 
 	err = kbase_common_device_init(kbdev);
@@ -3182,10 +3018,6 @@ out:
 
 static int kbase_common_device_remove(struct kbase_device *kbdev)
 {
-#if SLSI_INTEGRATION
-		exynos_hwcnt_remove(kbdev);
-#endif
-
 #ifdef CONFIG_MALI_DEVFREQ
 	kbase_devfreq_term(kbdev);
 #endif
@@ -3336,11 +3168,6 @@ static int kbase_device_runtime_suspend(struct device *dev)
 	devfreq_suspend_device(kbdev->devfreq);
 #endif
 
-#if SLSI_INTEGRATION
-	if (kbdev->pm.active_count > 0)
-		return -EBUSY;
-#endif
-
 	if (kbdev->pm.callback_power_runtime_off) {
 		kbdev->pm.callback_power_runtime_off(kbdev);
 		dev_dbg(dev, "runtime suspend\n");
@@ -3427,7 +3254,7 @@ static struct platform_driver kbase_platform_driver = {
 		   .name = kbase_drv_name,
 		   .owner = THIS_MODULE,
 		   .pm = &kbase_pm_ops,
-		   .of_match_table = exynos_mali_match, /* SLSI of_match_ptr(kbase_dt_ids),*/
+		   .of_match_table = of_match_ptr(kbase_dt_ids),
 	},
 };
 
@@ -3449,11 +3276,10 @@ extern void kbase_platform_fake_unregister(void);
 static int __init kbase_driver_init(void)
 {
 	int ret;
-#ifdef 0 /* SLSI */
+
 	ret = kbase_platform_early_init();
 	if (ret)
 		return ret;
-#endif
 
 #ifdef CONFIG_MALI_PLATFORM_FAKE
 	ret = kbase_platform_fake_register();

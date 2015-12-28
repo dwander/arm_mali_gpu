@@ -27,6 +27,7 @@
 #include <mali_midg_regmap.h>
 #include <mali_kbase_gator.h>
 #include <mali_kbase_pm.h>
+#include <mali_kbase_config_defaults.h>
 
 #if KBASE_PM_EN
 
@@ -129,9 +130,6 @@ STATIC void kbase_pm_invoke(struct kbase_device *kbdev, enum kbase_pm_core_type 
 				break;
 			}
 	}
-
-	if (action == ACTION_PWROFF)
-		return;
 
 	if (lo != 0)
 		kbase_reg_write(kbdev, GPU_CONTROL_REG(reg), lo, NULL);
@@ -660,27 +658,23 @@ void kbase_pm_clock_on(struct kbase_device *kbdev, mali_bool is_resume)
 	if (is_resume && kbdev->pm.callback_power_resume) {
 		kbdev->pm.callback_power_resume(kbdev);
 	} else if (kbdev->pm.callback_power_on) {
-		if (kbdev->pm.callback_power_on(kbdev))
-			reset_required = MALI_TRUE;
+		kbdev->pm.callback_power_on(kbdev);
+		/* If your platform properly keeps the GPU state you may use the return
+		 * value of the callback_power_on function to conditionally reset the
+		 * GPU on power up. Currently we are conservative and always reset the
+		 * GPU. */
+		reset_required = MALI_TRUE;
 	}
 
-#if SLSI_INTEGRATION
 	spin_lock_irqsave(&kbdev->pm.gpu_powered_lock, flags);
 	kbdev->pm.gpu_powered = MALI_TRUE;
 	spin_unlock_irqrestore(&kbdev->pm.gpu_powered_lock, flags);
-#endif
 
 	if (reset_required) {
 		/* GPU state was lost, reset GPU to ensure it is in a
 		 * consistent state */
 		kbase_pm_init_hw(kbdev, MALI_TRUE);
 	}
-
-#if !SLSI_INTEGRATION
-	spin_lock_irqsave(&kbdev->pm.gpu_powered_lock, flags);
-	kbdev->pm.gpu_powered = MALI_TRUE;
-	spin_unlock_irqrestore(&kbdev->pm.gpu_powered_lock, flags);
-#endif
 
 	/* Lastly, enable the interrupts */
 	kbase_pm_enable_interrupts(kbdev);

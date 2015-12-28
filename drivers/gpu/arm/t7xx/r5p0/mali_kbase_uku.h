@@ -61,9 +61,6 @@ struct kbase_uk_mem_alloc {
 	u64 gpu_va;
 	u16 va_alignment;
 	u8  padding[6];
-#if SLSI_INTEGRATION
-	u64 sec_flag;
-#endif
 };
 
 struct kbase_uk_mem_free {
@@ -147,36 +144,9 @@ struct kbase_uk_hwcnt_dump {
 	union uk_header header;
 };
 
-#if SLSI_INTEGRATION
-struct kbase_uk_hwcnt_gpr_dump {
-	union uk_header header;
-	u32 shader_20;
-	u32 shader_21;
-};
-#endif
-
 struct kbase_uk_hwcnt_clear {
 	union uk_header header;
 };
-
-#if SLSI_INTEGRATION
-#define TMU_INDEX_MAX 10
-struct kbase_uk_tmu_skip {
-	union uk_header header;
-	/* IN */
-	u32 temperature[TMU_INDEX_MAX];
-	u32 skip_count[TMU_INDEX_MAX];
-	u32 num_ratiometer;
-	/* OUT */
-};
-
-struct kbase_uk_vsync_skip {
-	union uk_header header;
-	/* IN */
-	u32 skip_count;
-	/* OUT */
-};
-#endif
 
 struct kbase_uk_fence_validate {
 	union uk_header header;
@@ -500,22 +470,8 @@ enum kbase_uk_function_id {
 
 	KBASE_FUNC_DEBUGFS_MEM_PROFILE_ADD = (UK_FUNC_ID + 27),
 	KBASE_FUNC_JOB_SUBMIT = (UK_FUNC_ID + 28),
-	KBASE_FUNC_DISJOINT_QUERY = (UK_FUNC_ID + 29),
+	KBASE_FUNC_DISJOINT_QUERY = (UK_FUNC_ID + 29)
 
-#if SLSI_INTEGRATION
-	KBASE_FUNC_HWCNT_UTIL_SETUP,
-	KBASE_FUNC_HWCNT_GPR_DUMP,
-	KBASE_FUNC_VSYNC_SKIP,
-#endif
-#if SLSI_INTEGRATION
-	KBASE_FUNC_CREATE_SURFACE,
-	KBASE_FUNC_DESTROY_SURFACE,
-	KBASE_FUNC_SET_MIN_LOCK,
-	KBASE_FUNC_UNSET_MIN_LOCK,
-	KBASE_FUNC_UNSET_GPU_MIN_LOCK,
-	KBASE_FUNC_TMU_SKIP,
-#endif
-	KBASE_FUNC_END
-}; 
+};
 
 #endif				/* _KBASE_UKU_H_ */

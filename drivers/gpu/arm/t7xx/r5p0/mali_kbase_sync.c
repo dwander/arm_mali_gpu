@@ -23,9 +23,8 @@
  */
 
 #ifdef CONFIG_SYNC
-#ifdef SLSI_FENCE_INTEGRATION
-#include <../../../../staging/android/sync.h>
-#endif /* SLSI_FENCE_INTEGRATION */
+
+#include "sync.h"
 #include <mali_kbase.h>
 
 struct mali_sync_timeline {

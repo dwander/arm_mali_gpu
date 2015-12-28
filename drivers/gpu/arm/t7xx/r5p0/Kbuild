@@ -15,7 +15,7 @@
 
 
 # Driver version string which is returned to userspace via an ioctl
-MALI_RELEASE_NAME ?= "r5p0-04dev0"
+MALI_RELEASE_NAME ?= "r5p0-06rel0"
 
 # Paths required for build
 KBASE_PATH = $(src)
@@ -34,7 +34,6 @@ MALI_ERROR_INJECT_ON ?= 0
 MALI_MOCK_TEST ?= 0
 MALI_COVERAGE ?= 0
 MALI_INSTRUMENTATION_LEVEL ?= 0
-SLSI_INTEGRATION ?= 1
 # This workaround is for what seems to be a compiler bug we observed in
 # GCC 4.7 on AOSP 4.3.  The bug caused an intermittent failure compiling
 # the "_Pragma" syntax, where an error message is returned:
@@ -47,33 +46,6 @@ SLSI_INTEGRATION ?= 1
 # workaround, i.e. set the define to 0.
 MALI_GCC_WORKAROUND_MIDCOM_4598 ?= 0
 
-# Mali Overlay #
-SOC_NAME ?= 5430
-
-ifeq ($(CONFIG_SOC_EXYNOS5250),y)
-        SOC_NAME=5250
-endif
-ifeq ($(CONFIG_SOC_EXYNOS5412),y)
-        SOC_NAME=5412
-endif
-ifeq ($(CONFIG_SOC_EXYNOS5420),y)
-        SOC_NAME=5420
-endif
-ifeq ($(CONFIG_SOC_EXYNOS5422),y)
-	SOC_NAME=5422
-endif
-ifeq ($(CONFIG_SOC_EXYNOS5430),y)
-	SOC_NAME=5430
-endif
-ifeq ($(CONFIG_SOC_EXYNOS5433),y)
-	SOC_NAME=5433
-endif
-ifeq ($(CONFIG_SOC_EXYNOS7420),y)
-	SOC_NAME=7420
-endif
-
-# Mali Overlay #
-
 # Set up our defines, which will be passed to gcc
 DEFINES = \
 	-DMALI_CUSTOMER_RELEASE=$(MALI_CUSTOMER_RELEASE) \
@@ -84,7 +56,6 @@ DEFINES = \
 	-DMALI_COVERAGE=$(MALI_COVERAGE) \
 	-DMALI_INSTRUMENTATION_LEVEL=$(MALI_INSTRUMENTATION_LEVEL) \
 	-DMALI_RELEASE_NAME=\"$(MALI_RELEASE_NAME)\" \
-	-DSOC_NAME=$(SOC_NAME) \
 	-DMALI_GCC_WORKAROUND_MIDCOM_4598=$(MALI_GCC_WORKAROUND_MIDCOM_4598)
 
 ifeq ($(KBUILD_EXTMOD),)
@@ -95,18 +66,11 @@ else
 DEFINES +=-DMALI_KBASE_THIRDPARTY_PATH=$(src)/platform/$(CONFIG_MALI_PLATFORM_THIRDPARTY_NAME)
 endif
 
-#MALI_SEC
-DEFINES +=-DSLSI_INTEGRATION=$(SLSI_INTEGRATION)
-DEFINES +=-DSLSI_FENCE_INTEGRATION
-DEFINES +=-DCL_UTILIZATION_BOOST_BY_TIME_WEIGHT
-DEFINES +=-DSLSI_SUBSTITUTE
-ifeq ($(CONFIG_MALI_SEPERATED_UTILIZATION),y)
-       DEFINES +=-DSEPERATED_UTILIZATION
-endif
+DEFINES += -I$(srctree)/drivers/staging/android
 
 # Use our defines when compiling
-ccflags-y += $(DEFINES) -I$(KBASE_PATH)   -I$(KBASE_PLATFORM_PATH) -I$(UMP_PATH)
-subdir-ccflags-y += $(DEFINES) -I$(KBASE_PATH)   -I$(KBASE_PLATFORM_PATH) -I$(OSK_PATH) -I$(UMP_PATH)
+ccflags-y += $(DEFINES) -I$(KBASE_PATH)   -I$(KBASE_PLATFORM_PATH) -I$(UMP_PATH) -I$(srctree)/include/linux
+subdir-ccflags-y += $(DEFINES) -I$(KBASE_PATH)   -I$(KBASE_PLATFORM_PATH) -I$(OSK_PATH) -I$(UMP_PATH) -I$(srctree)/include/linux
 
 SRC := \
 	mali_kbase_device.c \
@@ -257,38 +221,38 @@ ifeq ($(CONFIG_MALI_PLATFORM_FAKE),y)
 	endif
 
 	ifeq ($(CONFIG_MALI_PLATFORM_THIRDPARTY),y)
-	ifeq ($(CONFIG_MALI_MIDGARD),m)
 	# remove begin and end quotes from the Kconfig string type
 	platform_name := $(shell echo $(CONFIG_MALI_PLATFORM_THIRDPARTY_NAME))
 	MALI_PLATFORM_THIRDPARTY_DIR := platform/$(platform_name)
+	ccflags-y += -I$(src)/$(MALI_PLATFORM_THIRDPARTY_DIR)
+	ifeq ($(CONFIG_MALI_MIDGARD),m)
 	include  $(src)/platform/$(platform_name)/Kbuild
 	else ifeq ($(CONFIG_MALI_MIDGARD),y)
-	obj-$(CONFIG_MALI_R5P0) += platform/
+	obj-$(CONFIG_MALI_MIDGARD) += platform/
 	endif
 	endif
 endif # CONFIG_MALI_PLATFORM_FAKE=y
 
 ifeq ($(CONFIG_MALI_PLATFORM_THIRDPARTY),y)
-ifeq ($(CONFIG_MALI_R5P0),m)
 # remove begin and end quotes from the Kconfig string type
 platform_name := $(shell echo $(CONFIG_MALI_PLATFORM_THIRDPARTY_NAME))
 MALI_PLATFORM_THIRDPARTY_DIR := platform/$(platform_name)
+ccflags-y += -I$(src)/$(MALI_PLATFORM_THIRDPARTY_DIR)
+ifeq ($(CONFIG_MALI_MIDGARD),m)
 include  $(src)/platform/$(platform_name)/Kbuild
-else ifeq ($(CONFIG_MALI_R5P0),y)
-obj-$(CONFIG_MALI_R5P0) += platform/
+else ifeq ($(CONFIG_MALI_MIDGARD),y)
+obj-$(CONFIG_MALI_MIDGARD) += platform/
 endif
 endif
 
 # Tell the Linux build system from which .o file to create the kernel module
-obj-$(CONFIG_MALI_R5P0) += mali_kbase.o
+obj-$(CONFIG_MALI_MIDGARD) += mali_kbase.o
 
 # Tell the Linux build system to enable building of our .c files
 mali_kbase-y := $(SRC:.c=.o)
 
-ifeq ($(CONFIG_MALI_MIDGARD),m)
 mali_kbase-$(CONFIG_MALI_DEVFREQ) += mali_kbase_devfreq.o
 mali_kbase-$(CONFIG_MALI_POWER_ACTOR) += mali_kbase_power_actor.o
-endif
 
 ifneq ($(wildcard $(src)/internal/Kbuild),)
 ifeq ($(MALI_CUSTOMER_RELEASE),0)

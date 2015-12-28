@@ -885,14 +885,8 @@ int kbase_mem_commit(struct kbase_context *kctx, mali_addr64 gpu_addr, u64 new_p
 			*failure_reason = BASE_BACKING_THRESHOLD_ERROR_OOM;
 			goto out_unlock;
 		}
-#if SLSI_INTEGRATION
-		kbase_alloc_phy_pages_helper_gpu(reg, delta);
-#endif
 		err = kbase_mmu_insert_pages(kctx, reg->start_pfn + old_pages, phy_pages + old_pages, delta, reg->flags);
 		if (MALI_ERROR_NONE != err) {
-#if SLSI_INTEGRATION
-			kbase_free_phy_pages_helper_gpu(reg, delta);
-#endif
 			kbase_free_phy_pages_helper(reg->alloc, delta);
 			*failure_reason = BASE_BACKING_THRESHOLD_ERROR_OOM;
 			goto out_unlock;
@@ -941,9 +935,6 @@ int kbase_mem_commit(struct kbase_context *kctx, mali_addr64 gpu_addr, u64 new_p
 			kbase_wait_write_flush(kctx);
 		}
 
-#if SLSI_INTEGRATION
-		kbase_free_phy_pages_helper_gpu(reg, delta);
-#endif
 		kbase_free_phy_pages_helper(reg->alloc, delta);
 	}
 
@@ -984,12 +975,7 @@ STATIC void kbase_cpu_vm_close(struct vm_area_struct *vma)
 
 	if (map->region) {
 		KBASE_DEBUG_ASSERT((map->region->flags & KBASE_REG_ZONE_MASK) == KBASE_REG_ZONE_SAME_VA);
-#if SLSI_INTEGRATION
-	  if (!(current->flags & PF_EXITING))
-			kbase_mem_free_region(map->kctx, map->region);
-#else
- 		kbase_mem_free_region(map->kctx, map->region);
-#endif
+		kbase_mem_free_region(map->kctx, map->region);
 	}
 
 	list_del(&map->mappings_list);

@@ -25,10 +25,6 @@
 #include <mali_kbase.h>
 #include <mali_midg_regmap.h>
 
-#if SLSI_INTEGRATION
-#include <platform/gpu_hwcnt.h>
-#endif
-
 /**
  * @brief Issue Cache Clean & Invalidate command to hardware
  */
@@ -44,14 +40,6 @@ static void kbasep_instr_hwcnt_cacheclean(struct kbase_device *kbdev)
 	/* Wait for any reset to complete */
 	while (kbdev->hwcnt.state == KBASE_INSTR_STATE_RESETTING) {
 		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
-#if SLSI_INTEGRATION
-		if (kbdev->hwcnt.prev_mm) {
-			int ret = wait_event_timeout(kbdev->hwcnt.cache_clean_wait,
-			           kbdev->hwcnt.state != KBASE_INSTR_STATE_RESETTING, kbdev->hwcnt.timeout);
-			if (ret == 0)
-				kbdev->hwcnt.state = KBASE_INSTR_STATE_IDLE;
-		} else
-#endif
 		wait_event(kbdev->hwcnt.cache_clean_wait,
 				kbdev->hwcnt.state != KBASE_INSTR_STATE_RESETTING);
 		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
@@ -111,11 +99,6 @@ STATIC mali_error kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev, 
 	if (kbdev->hwcnt.state == KBASE_INSTR_STATE_RESETTING) {
 		/* GPU is being reset */
 		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
-#if SLSI_INTEGRATION
-		if (kbdev->hwcnt.prev_mm)
-			wait_event_timeout(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0, kbdev->hwcnt.timeout);
-		else
-#endif
 		wait_event(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0);
 		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
 	}
@@ -150,11 +133,6 @@ STATIC mali_error kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev, 
 	spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
 
 	/* Wait for cacheclean to complete */
-#if SLSI_INTEGRATION
-	if (kbdev->hwcnt.prev_mm)
-		wait_event_timeout(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0, kbdev->hwcnt.timeout);
-	else
-#endif
 	wait_event(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0);
 
 	KBASE_DEBUG_ASSERT(kbdev->hwcnt.state == KBASE_INSTR_STATE_IDLE);
@@ -187,11 +165,6 @@ STATIC mali_error kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev, 
 	if (kbdev->hwcnt.state == KBASE_INSTR_STATE_RESETTING) {
 		/* GPU is being reset */
 		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
-#if SLSI_INTEGRATION
-		if (kbdev->hwcnt.prev_mm)
-			wait_event_timeout(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0, kbdev->hwcnt.timeout);
-		else
-#endif
 		wait_event(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0);
 		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
 	}
@@ -203,18 +176,6 @@ STATIC mali_error kbase_instr_hwcnt_enable_internal(struct kbase_device *kbdev, 
 	spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
 
 	err = MALI_ERROR_NONE;
-
-#if SLSI_INTEGRATION
-	if (setup->padding == HWC_MODE_UTILIZATION) {
-		if (!kbdev->hwcnt.kspace_addr) {
-			if (setup->dump_buffer < 0x100000000)
-				kbdev->hwcnt.kspace_addr = kbase_kmap_from_user_virtual_address(kbdev, (u32)setup->dump_buffer);
-			else
-				kbdev->hwcnt.kspace_addr = kbase_kmap_from_physical_address(kbdev);
-		}
-	}
-	kbdev->hwcnt.trig_exception = 0;
-#endif
 
 	dev_dbg(kbdev->dev, "HW counters dumping set-up for context %p", kctx);
 	return err;
@@ -263,9 +224,6 @@ mali_error kbase_instr_hwcnt_disable(struct kbase_context *kctx)
 	kbdev = kctx->kbdev;
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
 
-	/* S.LSI 140925 */
-	flush_work(&kbdev->hwcnt.cache_clean_work);
-
 	while (1) {
 		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
 
@@ -287,13 +245,6 @@ mali_error kbase_instr_hwcnt_disable(struct kbase_context *kctx)
 		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
 
 		/* Ongoing dump/setup - wait for its completion */
-#if SLSI_INTEGRATION
-		if (kbdev->hwcnt.prev_mm) {
-			int ret = wait_event_timeout(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0, kbdev->hwcnt.timeout);
-			if (ret == 0)
-				kbdev->hwcnt.state = KBASE_INSTR_STATE_IDLE;
-		} else
-#endif
 		wait_event(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0);
 	}
 
@@ -329,15 +280,6 @@ mali_error kbase_instr_hwcnt_disable(struct kbase_context *kctx)
 	err = MALI_ERROR_NONE;
 
  out:
-
-#if SLSI_INTEGRATION
-	if (kbdev->hwcnt.kspace_addr) {
-		kbase_kunmap_from_physical_address(kbdev);
-		kbdev->hwcnt.trig_exception = 0;
-		kbdev->hwcnt.kspace_addr = 0;
-	}
-#endif
-
 	return err;
 }
 KBASE_EXPORT_SYMBOL(kbase_instr_hwcnt_disable)
@@ -371,126 +313,6 @@ mali_error kbase_instr_hwcnt_setup(struct kbase_context *kctx, struct kbase_uk_h
  out:
 	return err;
 }
-
-#if SLSI_INTEGRATION
-/**
- * @brief Configure HW counters collection
- */
-mali_error kbase_instr_hwcnt_util_setup(struct kbase_context *kctx, struct kbase_uk_hwcnt_setup *setup)
-{
-	mali_error err = MALI_ERROR_FUNCTION_FAILED;
-	struct kbase_device *kbdev;
-	struct exynos_context *platform;
-
-	KBASE_DEBUG_ASSERT(NULL != kctx);
-
-	kbdev = kctx->kbdev;
-	KBASE_DEBUG_ASSERT(NULL != kbdev);
-
-	if (NULL == setup) {
-		/* Bad parameter - abort */
-		goto out;
-	}
-
-	platform = (struct exynos_context *) kbdev->platform_context;
-
-	if ((!platform->hwcnt_gathering_status) && (!platform->hwcnt_gpr_status)) {
-		err = MALI_ERROR_NONE;
-		goto out;
-	}
-
-	if ((platform->hwcnt_gpr_status) && (setup->padding == HWC_MODE_GPR_EN)) {
-		if (!kbdev->hwcnt.prev_mm) {
-			err = MALI_ERROR_NONE;
-			goto out;
-		}
-
-		mutex_lock(&kbdev->hwcnt.mlock);
-
-		kbase_pm_policy_change(kbdev, 1);
-
-		if (platform->dvs_is_enabled) {
-			mutex_unlock(&kbdev->hwcnt.mlock);
-			kbase_pm_policy_change(kbdev, 2);
-			goto out;
-		}
-
-		kbdev->hwcnt.s_enable_for_utilization = kbdev->hwcnt.enable_for_utilization;
-		kbdev->hwcnt.enable_for_utilization = FALSE;
-		kbdev->hwcnt.enable_for_gpr = TRUE;
-		kbdev->hwcnt.condition_to_dump = TRUE;
-		kbdev->hwcnt.kctx_gpr = kctx;
-		platform->hwcnt_bt_clk = 0;
-
-		KBASE_TRACE_ADD_EXYNOS(kbdev, LSI_HWCNT_ON_GPR, NULL, NULL, 0u, (long unsigned int)kbdev->hwcnt.kspace_addr);
-
-		if (!kbdev->hwcnt.kspace_addr)
-			kbase_instr_hwcnt_start(kbdev);
-
-		err = MALI_ERROR_NONE;
-
-		mutex_unlock(&kbdev->hwcnt.mlock);
-		goto out;
-	} else if ((platform->hwcnt_gpr_status) && (setup->padding == HWC_MODE_GPR_DIS)) {
-		if (!kbdev->hwcnt.prev_mm) {
-			err = MALI_ERROR_NONE;
-			goto out;
-		}
-
-		mutex_lock(&kbdev->hwcnt.mlock);
-
-		KBASE_TRACE_ADD_EXYNOS(kbdev, LSI_HWCNT_OFF_GPR, NULL, NULL, 0u, (long unsigned int)kbdev->hwcnt.kspace_addr);
-
-		if (kbdev->hwcnt.kspace_addr)
-			kbase_instr_hwcnt_stop(kbdev);
-
-		kbase_pm_policy_change(kbdev, 2);
-
-		kbdev->hwcnt.condition_to_dump = FALSE;
-		kbdev->hwcnt.enable_for_gpr = FALSE;
-		kbdev->hwcnt.enable_for_utilization = kbdev->hwcnt.s_enable_for_utilization;
-		kbdev->hwcnt.kctx_gpr = NULL;
-		platform->hwcnt_bt_clk = 0;
-		err = MALI_ERROR_NONE;
-
-		mutex_unlock(&kbdev->hwcnt.mlock);
-		goto out;
-	}
-
-	if ((setup->dump_buffer != 0ULL) && (setup->padding == HWC_MODE_UTILIZATION)) {
-		if (kbdev->hwcnt.kspace_addr) {
-			err = MALI_ERROR_NONE;
-			goto out;
-		}
-
-		mutex_lock(&kbdev->hwcnt.mlock);
-
-		kbdev->hwcnt.prev_mm = current->mm ? current->mm:(struct mm_struct *)0x1;
-
-		kbase_pm_policy_change(kbdev, 1);
-
-		if (!kbdev->hwcnt.kspace_addr) {
-			/* First Enable HW counters, need for first initialization */
-			err = kbase_instr_hwcnt_enable_internal(kbdev, kctx, setup);
-		}
-
-		if (kbdev->hwcnt.kspace_addr)
-			kbase_instr_hwcnt_stop(kbdev);
-
-		kbase_pm_policy_change(kbdev, 2);
-
-		kbdev->hwcnt.condition_to_dump = FALSE;
-		kbdev->hwcnt.enable_for_utilization = TRUE;
-		platform->hwcnt_bt_clk = 0;
-		kbdev->hwcnt.cnt_for_stop = 0;
-		kbdev->hwcnt.cnt_for_bt_stop = 0;
-		mutex_unlock(&kbdev->hwcnt.mlock);
-	}
-
-out:
-	return err;
-}
-#endif
 
 /**
  * @brief Issue Dump command to hardware
@@ -588,11 +410,6 @@ mali_error kbase_instr_hwcnt_dump(struct kbase_context *kctx)
 	mali_error err = MALI_ERROR_FUNCTION_FAILED;
 	struct kbase_device *kbdev;
 
-#if SLSI_INTEGRATION
-	if (kctx == NULL)
-		goto out;
-#endif
-
 	KBASE_DEBUG_ASSERT(NULL != kctx);
 	kbdev = kctx->kbdev;
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
@@ -604,17 +421,6 @@ mali_error kbase_instr_hwcnt_dump(struct kbase_context *kctx)
 	}
 
 	/* Wait for dump & cacheclean to complete */
-#if SLSI_INTEGRATION
-	if (kbdev->hwcnt.prev_mm) {
-		int ret = wait_event_timeout(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0, kbdev->hwcnt.timeout);
-		if ((kbdev->hwcnt.trig_exception == 1) || (ret == 0)) {
-			kbdev->hwcnt.trig_exception = 0;
-			kbdev->hwcnt.state = KBASE_INSTR_STATE_IDLE;
-			err = MALI_ERROR_FUNCTION_FAILED;
-			goto out;
-		}
-	} else
-#endif
 	wait_event(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0);
 
 	spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
@@ -622,11 +428,6 @@ mali_error kbase_instr_hwcnt_dump(struct kbase_context *kctx)
 	if (kbdev->hwcnt.state == KBASE_INSTR_STATE_RESETTING) {
 		/* GPU is being reset */
 		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
-#if SLSI_INTEGRATION
-		if (kbdev->hwcnt.prev_mm)
-			wait_event_timeout(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0, kbdev->hwcnt.timeout);
-		else
-#endif
 		wait_event(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0);
 		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
 	}
@@ -646,183 +447,6 @@ mali_error kbase_instr_hwcnt_dump(struct kbase_context *kctx)
 }
 KBASE_EXPORT_SYMBOL(kbase_instr_hwcnt_dump)
 
-#if SLSI_INTEGRATION
-
-mali_error hwcnt_get_gpr_resouce(struct kbase_device *kbdev, struct kbase_uk_hwcnt_gpr_dump *dump)
-{
-	int num_cores;
-	int mem_offset;
-	unsigned int *addr32;
-	u32 shader_20 = 0, shader_21 = 0;
-	mali_error err = MALI_ERROR_FUNCTION_FAILED;
-	int i;
-
-	KBASE_DEBUG_ASSERT(kbdev);
-
-	if (!kbdev->hwcnt.kspace_addr) {
-		goto out;
-	}
-
-	if (kbdev->gpu_props.num_core_groups != 1) {
-		/* num of core groups must be 1 on T76X */
-		goto out;
-	}
-
-	num_cores = kbdev->gpu_props.num_cores;
-	addr32 = (unsigned int *)kbdev->hwcnt.kspace_addr;
-
-	if (num_cores <= 4)
-		mem_offset = MALI_SIZE_OF_HWCBLK * 3;
-	else
-		mem_offset = MALI_SIZE_OF_HWCBLK * 4;
-
-	for (i=0; i < num_cores; i++)
-	{
-		if ( i == 3 && (num_cores == 5 || num_cores == 6) )
-			mem_offset += MALI_SIZE_OF_HWCBLK;
-		shader_20 += *(addr32 + mem_offset + MALI_SIZE_OF_HWCBLK * i + OFFSET_SHADER_20);
-		shader_21 += *(addr32 + mem_offset + MALI_SIZE_OF_HWCBLK * i + OFFSET_SHADER_21);
-	}
-
-	//printk("[%d] [%d]\n", shader_20, shader_21);
-
-	dump->shader_20 = shader_20;
-	dump->shader_21 = shader_21;
-
-	err = MALI_ERROR_NONE;
-
-out:
-	return err;
-}
-
-/**
- * @brief Issue Dump command to hardware and wait for completion
- */
-mali_error kbase_instr_hwcnt_gpr_dump(struct kbase_context *kctx, struct kbase_uk_hwcnt_gpr_dump *dump)
-{
-	unsigned long flags;
-	mali_error err = MALI_ERROR_FUNCTION_FAILED;
-	struct kbase_device *kbdev;
-
-	if (kctx == NULL)
-		goto out;
-
-	kbdev = kctx->kbdev;
-
-	KBASE_DEBUG_ASSERT(NULL != kbdev);
-
-	mutex_lock(&kbdev->hwcnt.mlock);
-
-	if ((!kbdev->hwcnt.kctx) || (!kbdev->hwcnt.prev_mm)) {
-		mutex_unlock(&kbdev->hwcnt.mlock);
-		err = MALI_ERROR_NONE;
-		goto out;
-	}
-
-	if ((kbdev->hwcnt.enable_for_utilization) || (!kbdev->hwcnt.enable_for_gpr )) {
-		mutex_unlock(&kbdev->hwcnt.mlock);
-		err = MALI_ERROR_NONE;
-		goto out;
-	}
-
-	KBASE_DEBUG_ASSERT(NULL != kbdev->hwcnt.kctx);
-
-	if (NULL == dump) {
-		/* Bad parameter - abort */
-		mutex_unlock(&kbdev->hwcnt.mlock);
-		goto out;
-	}
-
-	err = kbase_instr_hwcnt_dump_irq(kbdev->hwcnt.kctx);
-	if (MALI_ERROR_NONE != err) {
-		/* Can't dump HW counters */
-		mutex_unlock(&kbdev->hwcnt.mlock);
-		goto out;
-	}
-
-	/* Wait for dump & cacheclean to complete */
-#if SLSI_INTEGRATION
-	if (kbdev->hwcnt.prev_mm)
-		wait_event_timeout(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0, kbdev->hwcnt.timeout);
-	else
-#endif
-	wait_event(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0);
-
-	spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
-
-	if (kbdev->hwcnt.state == KBASE_INSTR_STATE_RESETTING) {
-		/* GPU is being reset */
-		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
-#if SLSI_INTEGRATION
-		if (kbdev->hwcnt.prev_mm)
-			wait_event_timeout(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0, kbdev->hwcnt.timeout);
-		else
-#endif
-		wait_event(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0);
-		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
-	}
-
-	if (kbdev->hwcnt.state == KBASE_INSTR_STATE_FAULT) {
-		err = MALI_ERROR_FUNCTION_FAILED;
-		kbdev->hwcnt.state = KBASE_INSTR_STATE_IDLE;
-	} else {
-		/* Dump done */
-		KBASE_DEBUG_ASSERT(kbdev->hwcnt.state == KBASE_INSTR_STATE_IDLE);
-		err = MALI_ERROR_NONE;
-	}
-
-	spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
-
-	err = hwcnt_get_gpr_resouce(kbdev, dump);
-
-	mutex_unlock(&kbdev->hwcnt.mlock);
-
- out:
-	return err;
-}
-KBASE_EXPORT_SYMBOL(kbase_instr_hwcnt_gpr_dump)
-
-void kbase_instr_hwcnt_stop(struct kbase_device *kbdev)
-{
-	struct kbase_context *kctx;
-	KBASE_DEBUG_ASSERT(kbdev);
-
-	kctx = kbdev->hwcnt.kctx;
-	kbdev->hwcnt.suspended_kctx = kctx;
-
-	/* Relevant state was saved into hwcnt.suspended_state when enabling the
-	 * counters */
-
-	if (kctx)
-	{
-		KBASE_DEBUG_ASSERT(kctx->jctx.sched_info.ctx.flags & KBASE_CTX_FLAG_PRIVILEGED);
-		kbase_instr_hwcnt_disable(kctx);
-	}
-}
-
-void kbase_instr_hwcnt_start(struct kbase_device *kbdev)
-{
-	struct kbase_context *kctx;
-	KBASE_DEBUG_ASSERT(kbdev);
-
-	if (kbdev->hwcnt.suspended_kctx) {
-		kctx = kbdev->hwcnt.suspended_kctx;
-		kbdev->hwcnt.suspended_kctx = NULL;
-	} else {
-		kctx = kbdev->hwcnt.kctx;
-		if (kctx == NULL)
-			printk("hwcnt exception!!!! Both suspended_ktctx and kctx are NULL");
-	}
-
-	if (kctx) {
-		mali_error err;
-		err = kbase_instr_hwcnt_enable_internal(kbdev, kctx, &kbdev->hwcnt.suspended_state);
-		WARN(err != MALI_ERROR_NONE,
-		     "Failed to restore instrumented hardware counters on resume\n");
-	}
-}
-#endif
-
 /**
  * @brief Clear the HW counters
  */
@@ -841,11 +465,6 @@ mali_error kbase_instr_hwcnt_clear(struct kbase_context *kctx)
 	if (kbdev->hwcnt.state == KBASE_INSTR_STATE_RESETTING) {
 		/* GPU is being reset */
 		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
-#if SLSI_INTEGRATION
-		if (kbdev->hwcnt.prev_mm)
-			wait_event_timeout(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0, kbdev->hwcnt.timeout);
-		else
-#endif
 		wait_event(kbdev->hwcnt.wait, kbdev->hwcnt.triggered != 0);
 		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
 	}
@@ -884,15 +503,6 @@ void kbasep_cache_clean_worker(struct work_struct *data)
 	while (kbdev->hwcnt.state == KBASE_INSTR_STATE_RESETTING ||
 			kbdev->hwcnt.state == KBASE_INSTR_STATE_CLEANING) {
 		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
-#if SLSI_INTEGRATION
-		if (kbdev->hwcnt.prev_mm) {
-			int ret = wait_event_timeout(kbdev->hwcnt.cache_clean_wait,
-				(kbdev->hwcnt.state != KBASE_INSTR_STATE_RESETTING
-				&& kbdev->hwcnt.state != KBASE_INSTR_STATE_CLEANING), kbdev->hwcnt.timeout);
-			if (ret == 0)
-				kbdev->hwcnt.state = KBASE_INSTR_STATE_IDLE;
-		} else
-#endif
 		wait_event(kbdev->hwcnt.cache_clean_wait,
 		           (kbdev->hwcnt.state != KBASE_INSTR_STATE_RESETTING
 		            && kbdev->hwcnt.state != KBASE_INSTR_STATE_CLEANING));

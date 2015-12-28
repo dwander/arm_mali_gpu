@@ -43,7 +43,7 @@
 #endif				/* CONFIG_KDS */
 
 #ifdef CONFIG_SYNC
-#include <../../../../staging/android/sync.h>
+#include "sync.h"
 #endif				/* CONFIG_SYNC */
 
 #ifdef CONFIG_DEBUG_FS
@@ -55,7 +55,7 @@
 #endif /* CONFIG_DEVFREQ */
 
 /** Enable SW tracing when set */
-#ifdef CONFIG_MALI_ENABLE_TRACE
+#ifdef CONFIG_MALI_MIDGARD_ENABLE_TRACE
 #define KBASE_TRACE_ENABLE 1
 #endif
 
@@ -150,20 +150,9 @@
 #define KBASE_LOCK_REGION_MAX_SIZE (63)
 #define KBASE_LOCK_REGION_MIN_SIZE (11)
 
-/* MALI_SEC */
-#ifdef CONFIG_MALI_EXYNOS_TRACE
-#define KBASE_TRACE_SIZE_LOG2 10	/* 1024 entries */
-#else
 #define KBASE_TRACE_SIZE_LOG2 8	/* 256 entries */
-#endif
 #define KBASE_TRACE_SIZE (1 << KBASE_TRACE_SIZE_LOG2)
 #define KBASE_TRACE_MASK ((1 << KBASE_TRACE_SIZE_LOG2)-1)
-
-#if SLSI_INTEGRATION
-#define CTX_UNINITIALIZED 0xffffffff
-#define CTX_INITIALIZED 0x1
-#define CTX_DESTROYED 0x2
-#endif
 
 #include "mali_kbase_js_defs.h"
 
@@ -172,10 +161,6 @@
 /* Maximum force replay limit when randomization is enabled */
 #define KBASEP_FORCE_REPLAY_RANDOM_LIMIT 16
 
-#if SLSI_INTEGRATION
-#define CTX_NAME_SIZE 32
-#endif
-
 /** Atom has been previously soft-stoppped */
 #define KBASE_KATOM_FLAG_BEEN_SOFT_STOPPPED (1<<1)
 /** Atom has been previously retried to execute */
@@ -183,7 +168,6 @@
 #define KBASE_KATOM_FLAGS_JOBCHAIN (1<<3)
 /** Atom has been previously hard-stopped. */
 #define KBASE_KATOM_FLAG_BEEN_HARD_STOPPED (1<<4)
-
 /** Atom has caused us to enter disjoint state */
 #define KBASE_KATOM_FLAG_IN_DISJOINT (1<<5)
 
@@ -205,6 +189,7 @@
 #define JS_COMMAND_SOFT_STOP_WITH_SW_DISJOINT \
 		(JS_COMMAND_SW_CAUSES_DISJOINT | JS_COMMAND_SOFT_STOP)
 
+
 struct kbase_jd_atom_dependency
 {
 	struct kbase_jd_atom *atom;
@@ -212,7 +197,7 @@ struct kbase_jd_atom_dependency
 };
 
 /**
- * @brief The function retrieves a read-only reference to the atom field from
+ * @brief The function retrieves a read-only reference to the atom field from 
  * the  kbase_jd_atom_dependency structure
  *
  * @param[in] dep kbase jd atom dependency.
@@ -222,12 +207,12 @@ struct kbase_jd_atom_dependency
 static INLINE const struct kbase_jd_atom* const kbase_jd_katom_dep_atom(const struct kbase_jd_atom_dependency* dep)
 {
 	LOCAL_ASSERT(dep != NULL);
-
+	
 	return (const struct kbase_jd_atom* const )(dep->atom);
 }
-
+ 
 /**
- * @brief The function retrieves a read-only reference to the dependency type field from
+ * @brief The function retrieves a read-only reference to the dependency type field from 
  * the  kbase_jd_atom_dependency structure
  *
  * @param[in] dep kbase jd atom dependency.
@@ -249,18 +234,18 @@ static INLINE const u8 kbase_jd_katom_dep_type(const struct kbase_jd_atom_depend
  * @param     type   The ATOM dependency type to be set.
  *
  */
-static INLINE void kbase_jd_katom_dep_set(const struct kbase_jd_atom_dependency* const_dep,
+static INLINE void kbase_jd_katom_dep_set(const struct kbase_jd_atom_dependency* const_dep, 
 	struct kbase_jd_atom * a,
 	u8 type)
 {
 	struct kbase_jd_atom_dependency* dep;
-
+	
 	LOCAL_ASSERT(const_dep != NULL);
 
 	dep = (REINTERPRET_CAST(struct kbase_jd_atom_dependency* )const_dep);
 
 	dep->atom = a;
-	dep->dep_type = type;
+	dep->dep_type = type; 
 }
 
 /**
@@ -278,7 +263,7 @@ static INLINE void kbase_jd_katom_dep_clear(const struct kbase_jd_atom_dependenc
 	dep = (REINTERPRET_CAST(struct kbase_jd_atom_dependency* )const_dep);
 
 	dep->atom = NULL;
-	dep->dep_type = BASE_JD_DEP_TYPE_INVALID;
+	dep->dep_type = BASE_JD_DEP_TYPE_INVALID; 
 }
 
 struct kbase_ext_res
@@ -314,10 +299,6 @@ struct kbase_jd_atom {
 #ifdef CONFIG_SYNC
 	struct sync_fence *fence;
 	struct sync_fence_waiter sync_waiter;
-#if SLSI_INTEGRATION
-	struct mutex fence_mt;
-	struct timer_list fence_timer;
-#endif
 #endif				/* CONFIG_SYNC */
 
 	/* Note: refer to kbasep_js_atom_retained_state, which will take a copy of some of the following members */
@@ -329,8 +310,8 @@ struct kbase_jd_atom {
 	int retry_submit_on_slot;
 
 	union kbasep_js_policy_job_info sched_info;
-	/** JS atom priority with respect to other atoms on its kctx */
-	int sched_priority;
+	/* atom priority scaled to nice range with +20 offset 0..39 */
+	int nice_prio;
 
 	int poking;		/* BASE_HW_ISSUE_8316 */
 
@@ -511,10 +492,6 @@ struct kbasep_mem_device {
 	atomic_t used_pages;   /* Tracks usage of OS shared memory. Updated
 				   when OS memory is allocated/freed. */
 
-#if SLSI_INTEGRATION
-	atomic_t used_pmem_pages;
-	atomic_t used_tmem_pages;
-#endif
 };
 
 
@@ -546,11 +523,7 @@ struct kbase_trace {
 	u64 atom_udata[2];
 	u64 gpu_addr;
 	unsigned long info_val;
-#ifdef CONFIG_MALI_EXYNOS_TRACE
-	enum kbase_trace_code code;
-#else
 	u8 code;
-#endif
 	u8 jobslot;
 	u8 refcount;
 	u8 flags;
@@ -648,14 +621,6 @@ struct kbasep_kctx_list_element {
 };
 
 #define DEVNAME_SIZE	16
-
-#if SLSI_INTEGRATION
-typedef struct hwc_resources {
-	u32 arith_words;
-	u32 ls_issues;
-	u32 tex_issues;
-} hwc_resources;
-#endif
 
 struct kbase_device {
 	/** jm_slots is protected by kbasep_js_device_data::runpool_irq::lock */
@@ -776,25 +741,6 @@ struct kbase_device {
 
 		struct kbase_context *suspended_kctx;
 		struct kbase_uk_hwcnt_setup suspended_state;
-
-#if SLSI_INTEGRATION
-		struct mutex mlock;
-		void *kspace_addr;
-		u32 cnt_for_stop;
-		u32 cnt_for_bt_start;
-		u32 cnt_for_bt_stop;
-		unsigned long phy_addr;
-		struct hwc_resources resources;
-		bool condition_to_dump;
-		struct mm_struct *prev_mm;
-		bool enable_for_utilization;
-		bool enable_for_gpr;
-		bool s_enable_for_utilization;
-		const struct kbase_pm_policy *prev_policy;
-		struct kbase_context *kctx_gpr;
-		u32 timeout;
-		int trig_exception;
-#endif
 	} hwcnt;
 
 	/* Set when we're about to reset the GPU */
@@ -821,11 +767,7 @@ struct kbase_device {
 	spinlock_t              trace_lock;
 	u16                     trace_first_out;
 	u16                     trace_next_in;
-#ifdef CONFIG_MALI_EXYNOS_TRACE
-	struct kbase_trace      trace_rbuf[KBASE_TRACE_SIZE];
-#else
-	struct kbase_trace      *trace_rbuf;
-#endif
+	struct kbase_trace            *trace_rbuf;
 #endif
 
 #if !MALI_CUSTOMER_RELEASE
@@ -863,7 +805,7 @@ struct kbase_device {
 	struct list_head        kctx_list;
 	struct mutex            kctx_list_lock;
 
-#ifdef CONFIG_MALI_RT_PM
+#ifdef CONFIG_MALI_MIDGARD_RT_PM
 	struct delayed_work runtime_pm_workqueue;
 #endif
 
@@ -947,7 +889,7 @@ struct kbase_context {
 
 	unsigned long    cookies;
 	struct kbase_va_region *pending_regions[BITS_PER_LONG];
-
+	
 	wait_queue_head_t event_queue;
 	pid_t tgid;
 	pid_t pid;
@@ -1000,19 +942,6 @@ struct kbase_context {
 	/* Per-context directory for JD data */
 	struct dentry *jd_ctx_dir;
 #endif /* CONFIG_DEBUG_FS */
-#if SLSI_INTEGRATION
-	int ctx_status;
-	mali_bool ctx_need_qos;
-#endif
-
-#if SLSI_INTEGRATION
-	atomic_t used_pmem_pages;
-	atomic_t used_tmem_pages;
-
-	char name[CTX_NAME_SIZE];
-
-	mali_bool destroying_context;
-#endif
 };
 
 enum kbase_reg_access_type {
@@ -1037,11 +966,5 @@ enum kbase_share_attr_bits {
 
 /* Maximum number of times a job can be replayed */
 #define BASEP_JD_REPLAY_LIMIT 15
-
-
-/** Callback function for kbase_jm_enumerate_running_atoms_locked() */
-typedef void (kbase_jm_running_atoms_cb)(struct kbase_device *kbdev,
-		struct kbase_jd_atom *katom, int slot_idx, void *private);
-
 
 #endif				/* _KBASE_DEFS_H_ */

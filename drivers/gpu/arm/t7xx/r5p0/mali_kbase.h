@@ -111,9 +111,6 @@ void kbase_destroy_context(struct kbase_context *kctx);
 mali_error kbase_context_set_create_flags(struct kbase_context *kctx, u32 flags);
 
 mali_error kbase_instr_hwcnt_setup(struct kbase_context *kctx, struct kbase_uk_hwcnt_setup *setup);
-#if SLSI_INTEGRATION
-mali_error kbase_instr_hwcnt_util_setup(struct kbase_context *kctx, struct kbase_uk_hwcnt_setup *setup);
-#endif
 mali_error kbase_instr_hwcnt_enable(struct kbase_context *kctx, struct kbase_uk_hwcnt_setup *setup);
 mali_error kbase_instr_hwcnt_disable(struct kbase_context *kctx);
 mali_error kbase_instr_hwcnt_clear(struct kbase_context *kctx);
@@ -122,11 +119,7 @@ mali_error kbase_instr_hwcnt_dump_irq(struct kbase_context *kctx);
 mali_bool kbase_instr_hwcnt_dump_complete(struct kbase_context *kctx, mali_bool * const success);
 void kbase_instr_hwcnt_suspend(struct kbase_device *kbdev);
 void kbase_instr_hwcnt_resume(struct kbase_device *kbdev);
-#if SLSI_INTEGRATION
-mali_error kbase_instr_hwcnt_gpr_dump(struct kbase_context *kctx, struct kbase_uk_hwcnt_gpr_dump *dump);
-void kbase_instr_hwcnt_stop(struct kbase_device *kbdev);
-void kbase_instr_hwcnt_start(struct kbase_device *kbdev);
-#endif
+
 void kbasep_cache_clean_worker(struct work_struct *data);
 void kbase_clean_caches_done(struct kbase_device *kbdev);
 
@@ -451,10 +444,6 @@ void kbase_disjoint_state_down(struct kbase_device *kbdev);
 	kbasep_trace_add(kbdev, KBASE_TRACE_CODE(code), ctx, katom, gpu_addr, \
 			0, 0, 0, info_val)
 
-#define KBASE_TRACE_ADD_EXYNOS(kbdev, code, ctx, katom, gpu_addr, info_val)     \
-	kbasep_trace_add(kbdev, KBASE_TRACE_CODE(code), ctx, katom, gpu_addr, \
-			0, 0, 0, info_val)
-
 /** Clear the trace */
 #define KBASE_TRACE_CLEAR(kbdev) \
 	kbasep_trace_clear(kbdev)
@@ -553,17 +542,6 @@ void kbasep_trace_clear(struct kbase_device *kbdev);
 		CSTD_NOP(0);\
 	} while (0)
 
-#define KBASE_TRACE_ADD_EXYNOS(kbdev, code, subcode, ctx, katom, val)\
-	do {\
-		CSTD_UNUSED(kbdev);\
-		CSTD_NOP(code);\
-		CSTD_UNUSED(subcode);\
-		CSTD_UNUSED(ctx);\
-		CSTD_UNUSED(katom);\
-		CSTD_UNUSED(val);\
-		CSTD_NOP(0);\
-	} while (0)
-
 #define KBASE_TRACE_CLEAR(kbdev)\
 	do {\
 		CSTD_UNUSED(kbdev);\
@@ -577,7 +555,4 @@ void kbasep_trace_clear(struct kbase_device *kbdev);
 #endif /* KBASE_TRACE_ENABLE */
 /** PRIVATE - do not use directly. Use KBASE_TRACE_DUMP() instead */
 void kbasep_trace_dump(struct kbase_device *kbdev);
-
-/* MALI_SEC */
-void kbase_debug_dump_registers(struct kbase_device *kbdev);
 #endif

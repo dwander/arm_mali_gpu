@@ -274,8 +274,4 @@ void kbase_pm_request_l2_caches_l2_is_on(struct kbase_device *kbdev);
  */
 void kbase_pm_release_l2_caches(struct kbase_device *kbdev);
 
-#if SLSI_INTEGRATION
-mali_error kbase_pm_policy_change(struct kbase_device *kbdev, u32 mode);
-#endif
-
 #endif				/* _KBASE_PM_POLICY_H_ */

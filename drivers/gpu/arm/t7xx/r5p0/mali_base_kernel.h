@@ -325,10 +325,10 @@ struct base_mem_aliasing_info {
 /**
  * @brief Job dependency type.
  *
- * A flags field will be inserted into the atom structure to specify whether a dependency is a data or
- * ordering dependency (by putting it before/after 'core_req' in the structure it should be possible to add without
+ * A flags field will be inserted into the atom structure to specify whether a dependency is a data or 
+ * ordering dependency (by putting it before/after 'core_req' in the structure it should be possible to add without 
  * changing the structure size).
- * When the flag is set for a particular dependency to signal that it is an ordering only dependency then
+ * When the flag is set for a particular dependency to signal that it is an ordering only dependency then 
  * errors will not be propagated.
  */
 typedef u8 base_jd_dep_type;
@@ -465,7 +465,7 @@ typedef u16 base_jd_core_req;
  *
  * This is only guaranteed to work for BASE_JD_REQ_ONLY_COMPUTE atoms.
  *
- * If the core availability policy is keeping the required core group turned off, then
+ * If the core availability policy is keeping the required core group turned off, then 
  * the job will fail with a BASE_JD_EVENT_PM_EVENT error code.
  */
 #define BASE_JD_REQ_SPECIFIC_COHERENT_GROUP (1U << 11)
@@ -543,56 +543,6 @@ enum kbase_atom_coreref_state {
 	KBASE_ATOM_COREREF_STATE_READY
 };
 
-/**
- * Base Atom priority
- *
- * Only certain priority levels are actually implemented, as specified by the
- * BASE_JD_PRIO_<...> definitions below. It is undefined to use a priority
- * level that is not one of those defined below.
- *
- * Priority levels only affect scheduling between atoms within a base context,
- * and only after the atoms have had dependencies resolved. For example, a low
- * priority atom that has had its dependencies resolved might run before a
- * higher priority atom that has not had its dependencies resolved.
- *
- * The scheduling between base contexts/processes and between atoms from
- * different base contexts/processes is unaffected by atom priority.
- *
- * When DEFAULT_ATOM_PRIORITY_BLOCKS_ENTIRE_GPU is set in the kernel, then atom
- * priority is observed GPU-wide. Otherwise, Priority of Fragment atoms only
- * affects other Fragment atoms, and the priority of Non-fragment atoms only
- * affects other Non-fragment atoms. That is, Fragment and Non-fragment atoms
- * are scheduled independently (regardless of priority) when
- * DEFAULT_ATOM_PRIORITY_BLOCKS_ENTIRE_GPU is 0.
- *
- * The atoms are scheduled as follows with respect to their priorities:
- * - Let atoms 'X' and 'Y' be those who have dependencies resolved, and atom
- *   'X' has a higher priority than atom 'Y'.
- *  - In the case of DEFAULT_ATOM_PRIORITY_BLOCKS_ENTIRE_GPU==0, then
- *    either: let 'X' and 'Y' both be fragment atoms; or let 'X' and 'Y' both be
- *    non-fragment atoms (but not 'X' is fragment, 'Y' is non-fragment etc.)
- * - If atom 'Y' is currently running on the HW, then it is interrupted to
- *   allow atom 'X' to run soon after
- * - If instead neither atom 'Y' nor atom 'X' are running, then when choosing
- *   the next atom to run, atom 'X' will always be chosen instead of atom 'Y'
- * - Any two atoms that have the same priority could run in any order with
- *   respect to each other. That is, there is no ordering constraint between
- *   atoms of the same priority.
- */
-typedef u8 base_jd_prio;
-
-/** Medium atom priority. This is a priority higher than BASE_JD_PRIO_LOW */
-#define BASE_JD_PRIO_MEDIUM  ((base_jd_prio)0)
-/** High atom priority. This is a priority higher than BASE_JD_PRIO_MEDIUM and
- * BASE_JD_PRIO_LOW */
-#define BASE_JD_PRIO_HIGH    ((base_jd_prio)1)
-/** Low atom priority. */
-#define BASE_JD_PRIO_LOW     ((base_jd_prio)2)
-
-/** Count of the number of priority levels. This itself is not a valid
- * base_jd_prio setting */
-#define BASE_JD_NR_PRIO_LEVELS 3
-
 enum kbase_jd_atom_state {
 	/** Atom is not used */
 	KBASE_JD_ATOM_STATE_UNUSED,
@@ -609,7 +559,7 @@ typedef u8 base_atom_id; /**< Type big enough to store an atom number in */
 struct base_dependency {
 	base_atom_id  atom_id;               /**< An atom number */
 	base_jd_dep_type dependency_type;    /**< Dependency type */
-};
+}; 
 
 typedef struct base_jd_atom_v2 {
 	mali_addr64 jc;			    /**< job-chain GPU address */
@@ -620,7 +570,7 @@ typedef struct base_jd_atom_v2 {
 	const struct base_dependency pre_dep[2]; /**< pre-dependencies, one need to use SETTER function to assign this field,
 	this is done in order to reduce possibility of improper assigment of a dependency field */
 	base_atom_id atom_number;	    /**< unique number to identify the atom */
-	base_jd_prio prio;                  /**< Atom priority. Refer to @ref base_jd_prio for more details */
+	s8 prio;			    /**< priority - smaller is higher priority */
 	u8 device_nr;			    /**< coregroup when BASE_JD_REQ_SPECIFIC_COHERENT_GROUP specified */
 	u8 padding[5];
 } base_jd_atom_v2;
@@ -660,10 +610,10 @@ typedef struct base_external_resource {
 static INLINE void base_jd_atom_dep_set(const struct base_dependency* const_dep, base_atom_id id, base_jd_dep_type dep_type)
 {
 	struct base_dependency* dep;
-
+	
 	LOCAL_ASSERT(const_dep != NULL);
 	/* make sure we don't set not allowed combinations of atom_id/dependency_type */
-	LOCAL_ASSERT( ( id == 0 && dep_type == BASE_JD_DEP_TYPE_INVALID) ||
+	LOCAL_ASSERT( ( id == 0 && dep_type == BASE_JD_DEP_TYPE_INVALID) || 
 				(id > 0 && dep_type != BASE_JD_DEP_TYPE_INVALID) );
 
 	dep = REINTERPRET_CAST(struct base_dependency*)const_dep;
@@ -1290,10 +1240,10 @@ struct mali_base_gpu_tiler_props {
 };
 
 /**
- * GPU threading system details.
+ * GPU threading system details.  
  */
 struct mali_base_gpu_thread_props {
-	u32 max_threads;            /* Max. number of threads per core */
+	u32 max_threads;            /* Max. number of threads per core */ 
 	u32 max_workgroup_size;     /* Max. number of threads per workgroup */
 	u32 max_barrier_size;       /* Max. number of threads that can synchronize on a simple barrier */
 	u16 max_registers;			/* Total size [1..65535] of the register file available per core. */
@@ -1310,7 +1260,14 @@ struct mali_base_gpu_thread_props {
  * provides a cached population-count for that mask.
  *
  * @note Whilst all cores are exposed in the mask, not all may be available to
- * the application, depending on the Kernel Power policy.
+ * the application, depending on the Kernel Job Scheduler policy. Therefore,
+ * the application should not further restrict the core mask itself, as it may
+ * result in an empty core mask. However, it can guarentee that there will be
+ * at least one core available for each core group exposed .
+ *
+ * @usecase Chains marked at certain user-side priorities (e.g. the Long-running
+ * (batch) priority ) can be prevented from running on entire core groups by the
+ * Kernel Chain Scheduler policy.
  *
  * @note if u64s must be 8-byte aligned, then this structure has 32-bits of wastage.
  */
@@ -1394,7 +1351,7 @@ struct midg_raw_gpu_props {
 	u32 texture_features[3];
 
 	u32 gpu_id;
-
+	
 	u32 thread_max_threads;
 	u32 thread_max_workgroup_size;
 	u32 thread_max_barrier_size;

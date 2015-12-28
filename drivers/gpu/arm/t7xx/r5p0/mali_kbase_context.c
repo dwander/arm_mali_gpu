@@ -25,13 +25,6 @@
 #include <mali_kbase.h>
 #include <mali_midg_regmap.h>
 
-#if SLSI_INTEGRATION
-#include <linux/pm_qos.h>
-#include <linux/sched.h>
-#include <platform/mali_kbase_platform.h>
-#include <platform/gpu_dvfs_handler.h>
-#endif
-
 #define MEMPOOL_PAGES 16384
 
 
@@ -45,9 +38,6 @@ kbase_create_context(struct kbase_device *kbdev, bool is_compat)
 {
 	struct kbase_context *kctx;
 	mali_error mali_err;
-#if SLSI_INTEGRATION
-	char current_name[sizeof(current->comm)];
-#endif
 
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
 
@@ -63,10 +53,6 @@ kbase_create_context(struct kbase_device *kbdev, bool is_compat)
 	kctx->kbdev = kbdev;
 	kctx->as_nr = KBASEP_AS_NR_INVALID;
 	kctx->is_compat = is_compat;
-#if SLSI_INTEGRATION
-	kctx->ctx_status = CTX_UNINITIALIZED;
-	kctx->ctx_need_qos = false;
-#endif
 #ifdef CONFIG_MALI_TRACE_TIMELINE
 	kctx->timeline.owner_tgid = task_tgid_nr(current);
 #endif
@@ -76,10 +62,6 @@ kbase_create_context(struct kbase_device *kbdev, bool is_compat)
 	spin_lock_init(&kctx->mm_update_lock);
 	kctx->process_mm = NULL;
 	atomic_set(&kctx->nonmapped_pages, 0);
-#if SLSI_INTEGRATION
-	get_task_comm(current_name, current);
-	strncpy((char *)(&kctx->name), current_name, CTX_NAME_SIZE);
-#endif
 
 	if (MALI_ERROR_NONE != kbase_mem_allocator_init(&kctx->osalloc,
 							MEMPOOL_PAGES,
@@ -88,10 +70,6 @@ kbase_create_context(struct kbase_device *kbdev, bool is_compat)
 
 	kctx->pgd_allocator = &kctx->osalloc;
 	atomic_set(&kctx->used_pages, 0);
-#if SLSI_INTEGRATION
-	atomic_set(&kctx->used_pmem_pages, 0);
-	atomic_set(&kctx->used_tmem_pages, 0);
-#endif
 
 	if (kbase_jd_init(kctx))
 		goto free_allocator;
@@ -147,12 +125,6 @@ kbase_create_context(struct kbase_device *kbdev, bool is_compat)
 	if (kbasep_jd_debugfs_ctx_add(kctx))
 		goto free_mem_profile;
 
-#if SLSI_INTEGRATION
-	kctx->ctx_status = CTX_INITIALIZED;
-	kctx->destroying_context = MALI_FALSE;
-#endif
-
-
 	return kctx;
 
 free_mem_profile:
@@ -197,27 +169,13 @@ void kbase_destroy_context(struct kbase_context *kctx)
 	struct kbase_device *kbdev;
 	int pages;
 	unsigned long pending_regions_to_clean;
-#if SLSI_INTEGRATION
-	if (!kctx) {
-		printk("An uninitialized or destroyed context is tried to be destroyed. kctx is null\n");
-		return ;
-	}
-	else if (kctx->ctx_status != CTX_INITIALIZED) {
-		printk("An uninitialized or destroyed context is tried to be destroyed\n");
-		printk("kctx: 0x%p, kctx->tgid: %d, kctx->ctx_status: 0x%x\n", kctx, kctx->tgid, kctx->ctx_status);
-		return ;
-	}
-#endif
+
 	KBASE_DEBUG_ASSERT(NULL != kctx);
 
 	kbdev = kctx->kbdev;
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
 
 	KBASE_TRACE_ADD(kbdev, CORE_CTX_DESTROY, kctx, NULL, 0u, 0u);
-
-#if SLSI_INTEGRATION       
-	kctx->destroying_context = MALI_TRUE;
-#endif
 
 	kbasep_jd_debugfs_ctx_remove(kctx);
 
@@ -228,71 +186,12 @@ void kbase_destroy_context(struct kbase_context *kctx)
 	 * thread. */
 	kbase_pm_context_active(kbdev);
 
-#if SLSI_INTEGRATION
-	if (kbdev->hwcnt.kctx == kctx || kbdev->hwcnt.suspended_kctx == kctx) {
-#else
 	if (kbdev->hwcnt.kctx == kctx) {
-#endif
 		/* disable the use of the hw counters if the app didn't use the API correctly or crashed */
 		KBASE_TRACE_ADD(kbdev, CORE_CTX_HWINSTR_TERM, kctx, NULL, 0u, 0u);
 		dev_warn(kbdev->dev, "The privileged process asking for instrumentation forgot to disable it " "before exiting. Will end instrumentation for them");
-#if SLSI_INTEGRATION
-		if (kbdev->hwcnt.prev_mm) {
-			struct exynos_context *platform = (struct exynos_context *) kbdev->platform_context;
-
-			kbdev->hwcnt.triggered = 1;
-			kbdev->hwcnt.trig_exception = 1;
-			wake_up(&kbdev->hwcnt.wait);
-
-			mutex_lock(&kbdev->hwcnt.mlock);
-
-			kbdev->hwcnt.condition_to_dump = FALSE;
-			kbdev->hwcnt.enable_for_utilization = FALSE;
-			kbdev->hwcnt.enable_for_gpr = FALSE;
-			kbdev->hwcnt.cnt_for_stop = 0;
-			kbdev->hwcnt.cnt_for_bt_start = 0;
-			kbdev->hwcnt.cnt_for_bt_stop = 0;
-			platform->hwcnt_bt_clk = FALSE;
-
-			if (kbdev->hwcnt.kspace_addr) {
-				kbdev->hwcnt.state = KBASE_INSTR_STATE_IDLE;
-				kbase_instr_hwcnt_disable(kctx);
-			}
-
-			kbase_pm_policy_change(kbdev, 2);
-
-			kbdev->hwcnt.suspended_kctx = NULL;
-
-			mutex_unlock(&kbdev->hwcnt.mlock);
-		} else
-#endif
 		kbase_instr_hwcnt_disable(kctx);
 	}
-#if SLSI_INTEGRATION
-	else if (kbdev->hwcnt.kctx_gpr == kctx) {
-		if (kbdev->hwcnt.prev_mm) {
-			kbdev->hwcnt.triggered = 1;
-			kbdev->hwcnt.trig_exception = 1;
-			wake_up(&kbdev->hwcnt.wait);
-
-			mutex_lock(&kbdev->hwcnt.mlock);
-
-			if (kbdev->hwcnt.kspace_addr) {
-				kbdev->hwcnt.state = KBASE_INSTR_STATE_IDLE;
-				kbase_instr_hwcnt_stop(kbdev);
-			}
-
-			kbase_pm_policy_change(kbdev, 2);
-
-			kbdev->hwcnt.condition_to_dump = FALSE;
-			kbdev->hwcnt.enable_for_gpr = FALSE;
-			kbdev->hwcnt.enable_for_utilization = kbdev->hwcnt.s_enable_for_utilization;
-			kbdev->hwcnt.kctx_gpr = NULL;
-
-			mutex_unlock(&kbdev->hwcnt.mlock);
-		}
-	}
-#endif
 
 	kbase_jd_zap_context(kctx);
 	kbase_event_cleanup(kctx);
@@ -340,23 +239,8 @@ void kbase_destroy_context(struct kbase_context *kctx)
 
 	kbase_mem_allocator_term(&kctx->osalloc);
 	WARN_ON(atomic_read(&kctx->nonmapped_pages) != 0);
-#if SLSI_INTEGRATION
-	kctx->ctx_status = CTX_DESTROYED;
 
-	if (kctx->ctx_need_qos) {
-		kctx->ctx_need_qos = false;
-		set_hmp_boost(0);
-		set_hmp_aggressive_up_migration(false);
-		set_hmp_aggressive_yield(false);
-#ifdef CONFIG_MALI_DVFS
-		gpu_dvfs_boost_lock(GPU_DVFS_BOOST_UNSET);
-#endif /* CONFIG_MALI_DVFS */
-	}
-#endif
 	vfree(kctx);
-#if SLSI_INTEGRATION
-	kctx = NULL;
-#endif
 }
 KBASE_EXPORT_SYMBOL(kbase_destroy_context)
 

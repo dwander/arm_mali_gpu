@@ -789,12 +789,13 @@ static void kbasep_release_katom(struct kbase_context *kctx, int atom_id)
 static void kbasep_replay_create_atom(struct kbase_context *kctx,
 				      struct base_jd_atom_v2 *atom,
 				      int atom_nr,
-				      base_jd_prio prio)
+				      int prio)
 {
 	atom->nr_extres = 0;
 	atom->extres_list.value = NULL;
 	atom->device_nr = 0;
-	atom->prio = prio;
+	/* Convert priority back from NICE range */
+	atom->prio = ((prio << 16) / ((20 << 16) / 128)) - 128;
 	atom->atom_number = atom_nr;
 
 	base_jd_atom_dep_set(&atom->pre_dep[0], 0 , BASE_JD_DEP_TYPE_INVALID);
@@ -825,8 +826,7 @@ static void kbasep_replay_create_atom(struct kbase_context *kctx,
  */
 static mali_error kbasep_replay_create_atoms(struct kbase_context *kctx,
 		struct base_jd_atom_v2 *t_atom,
-		struct base_jd_atom_v2 *f_atom,
-		base_jd_prio prio)
+		struct base_jd_atom_v2 *f_atom, int prio)
 {
 	int t_atom_nr, f_atom_nr;
 
@@ -1035,7 +1035,6 @@ static void kbase_replay_process_worker(struct work_struct *data)
 
 	struct base_jd_atom_v2 t_atom, f_atom;
 	struct kbase_jd_atom *t_katom, *f_katom;
-	base_jd_prio atom_prio;
 
 	katom = container_of(data, struct kbase_jd_atom, work);
 	kctx = katom->kctx;
@@ -1043,10 +1042,8 @@ static void kbase_replay_process_worker(struct work_struct *data)
 
 	mutex_lock(&jctx->lock);
 
-	atom_prio = kbasep_js_sched_prio_to_atom_prio(katom->sched_priority);
-
 	if (kbasep_replay_create_atoms(kctx, &t_atom, &f_atom,
-				       atom_prio) != MALI_ERROR_NONE) {
+				       katom->nice_prio) != MALI_ERROR_NONE) {
 		katom->event_code = BASE_JD_EVENT_JOB_CANCELLED;
 		goto out;
 	}

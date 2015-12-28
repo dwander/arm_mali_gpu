@@ -192,36 +192,6 @@ void kbase_job_submit_nolock(struct kbase_device *kbdev, struct kbase_jd_atom *k
  */
 void kbase_job_done_slot(struct kbase_device *kbdev, int s, u32 completion_code, u64 job_tail, ktime_t *end_timestamp);
 
-
-/**
- * Enumerate atoms that are likely to be running on the HW
- *
- * This gives a consistent snapshot of atoms that are likely to be running on
- * the HW.
- *
- * Note that no check is made to see if an atom is really running on the HW,
- * because atoms could be completing whilst this function is
- * processing. However, you can be sure that the IRQ for the enumerated atom
- * has not been processed yet. That is, every atom passed into @a callback will
- * also be processed by kbase_jd_done() at some point later.
- *
- * Whilst more atoms can be enqueued on the HW than there are available entries
- * in the HW slots, this function only enumerates the last few that might be
- * running. Hence, it might not enumerate all atoms that are currently
- * completed but waiting for an IRQ to be handled. That is, some atoms
- * processed by kbase_jd_done() might not have @a callback called on them.
- *
- * The atoms are not enumerated in any particular order. That is, the
- * implementation might be changed to enumerate atoms in a different order in
- * future.
- *
- * The caller must ensure they have locked
- * kbasep_js_device_data::runpool_irq::lock
- */
-void kbase_jm_enumerate_running_atoms_locked(struct kbase_device *kbdev,
-		kbase_jm_running_atoms_cb *callback, void *private);
-
-
 	  /** @} *//* end group kbase_jm */
 	  /** @} *//* end group base_kbase_api */
 	  /** @} *//* end group base_api */

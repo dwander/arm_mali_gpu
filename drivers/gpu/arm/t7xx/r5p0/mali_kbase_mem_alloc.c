@@ -29,10 +29,6 @@
 #include <linux/atomic.h>
 #include <linux/version.h>
 
-#if SLSI_INTEGRATION
-#define MEM_FREE_LIMITS 16384
-#define MEM_FREE_DEFAULT 16384
-#endif
 int kbase_mem_lowlevel_init(struct kbase_device *kbdev)
 {
 	return 0;
@@ -196,13 +192,11 @@ mali_error kbase_mem_allocator_alloc(struct kbase_mem_allocator *allocator, size
 	gfp = GFP_HIGHUSER;
 #endif
 
-#ifndef SLSI_INTEGRATION
 	if (current->flags & PF_KTHREAD) {
 		/* Don't trigger OOM killer from kernel threads, e.g. when
 		 * growing memory on GPU page fault */
 		gfp |= __GFP_NORETRY;
 	}
-#endif
 
 	/* If not all pages were sourced from the pool, request new ones. */
 	for (; i < nr_pages; i++) {
@@ -249,46 +243,6 @@ err_out_roll_back:
 }
 KBASE_EXPORT_TEST_API(kbase_mem_allocator_alloc)
 
-#if SLSI_INTEGRATION
-void kbase_mem_set_max_size(struct kbase_context *kctx)
-{
-	struct kbase_mem_allocator *allocator = &kctx->osalloc;
-	mutex_lock(&allocator->free_list_lock);
-	allocator->free_list_max_size = MEM_FREE_DEFAULT;
-	mutex_unlock(&allocator->free_list_lock);
-}
-KBASE_EXPORT_TEST_API(kbase_mem_set_max_size)
-
-void kbase_mem_free_list_cleanup(struct kbase_context *kctx)
-{
-	int tofree,i=0;
-	struct kbase_mem_allocator *allocator = &kctx->osalloc;
-	tofree = MAX(MEM_FREE_LIMITS, atomic_read(&allocator->free_list_size)) - MEM_FREE_LIMITS;
-	if (tofree > 0)
-	{
-		struct page *p;
-		mutex_lock(&allocator->free_list_lock);
-	        allocator->free_list_max_size = MEM_FREE_LIMITS;
-		for(i=0; i < tofree; i++)
-		{
-			p = list_first_entry(&allocator->free_list_head, struct page, lru);
-			list_del(&p->lru);
-			if (likely(0 != p))
-			{
-			    dma_unmap_page(allocator->kbdev->dev, page_private(p),
-				    PAGE_SIZE,
-				    DMA_BIDIRECTIONAL);
-			    ClearPagePrivate(p);
-			    __free_page(p);
-			}
-		}
-		atomic_set(&allocator->free_list_size, MEM_FREE_LIMITS);
-		mutex_unlock(&allocator->free_list_lock);
-	}
-}
-KBASE_EXPORT_TEST_API(kbase_mem_free_list_cleanup)
-#endif
-
 void kbase_mem_allocator_free(struct kbase_mem_allocator *allocator, size_t nr_pages, phys_addr_t *pages, mali_bool sync_back)
 {
 	int i = 0;
@@ -325,11 +279,9 @@ void kbase_mem_allocator_free(struct kbase_mem_allocator *allocator, size_t nr_p
 	for (; i < nr_pages; i++) {
 		if (likely(0 != pages[i])) {
 			struct page *p;
-			struct page *prev = NULL;
 
 			p = pfn_to_page(PFN_DOWN(pages[i]));
 			pages[i] = (phys_addr_t)0;
-			BUG_ON(prev == p);
 			/* Sync back the memory to ensure that future cache
 			 * invalidations don't trample on memory.
 			 */
@@ -341,7 +293,6 @@ void kbase_mem_allocator_free(struct kbase_mem_allocator *allocator, size_t nr_p
 
 			list_add(&p->lru, &new_free_list_items);
 			page_count++;
-			prev = p;
 		}
 	}
 	mutex_lock(&allocator->free_list_lock);

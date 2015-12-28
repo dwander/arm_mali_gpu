@@ -298,10 +298,11 @@ STATIC u64 priority_weight(struct kbasep_js_policy_cfs_ctx *ctx_info, u64 time_u
 {
 	u64 time_delta_us;
 	int priority;
-	priority = ctx_info->process_priority;
+
+	priority = ctx_info->process_priority + ctx_info->bag_priority;
 
 	/* Adjust runtime_us using priority weight if required */
-	if (time_us != 0) {
+	if (priority != 0 && time_us != 0) {
 		int clamped_priority;
 
 		/* Clamp values to min..max weights */
@@ -587,40 +588,6 @@ STATIC mali_error cached_variant_idx_init(const struct kbasep_js_policy_cfs *pol
 	return MALI_ERROR_FUNCTION_FAILED;
 }
 
-/**
- * Get the index of the highest priority level that's currently active on this
- * context's atoms
- */
-STATIC unsigned int get_ctx_priority_idx(struct kbase_device *kbdev,
-		struct kbase_context *kctx, u32 variants_supported)
-{
-	int sched_prio;
-	/* Default slot_core_req = 0 doesn't assume this slot can run
-	 * BASE_JD_REQ_ONLY_COMPUTE and BASE_JD_REQ_CS. If we need to
-	 * distiguish those for priority in future, we'd need to add code for
-	 * that specially */
-	base_jd_core_req slot_core_req = 0u;
-	if ((variants_supported & (1u << CORE_REQ_VARIANT_FRAGMENT)))
-		slot_core_req = BASE_JD_REQ_FS;
-
-	for (sched_prio = KBASE_JS_ATOM_SCHED_PRIO_MIN;
-	     sched_prio <= KBASE_JS_ATOM_SCHED_PRIO_MAX;
-	     ++sched_prio) {
-		enum kbasep_js_ctx_attr ctx_attr;
-		ctx_attr = kbasep_js_ctx_attr_sched_prio_to_attr(slot_core_req,
-				sched_prio);
-
-		if (kbasep_js_ctx_attr_is_attr_on_ctx(kctx, ctx_attr))
-			break;
-	}
-
-	/* Handle where we don't have atoms of this type on the context */
-	if (sched_prio > KBASE_JS_ATOM_SCHED_PRIO_MAX)
-		sched_prio = KBASE_JS_ATOM_SCHED_PRIO_DEFAULT;
-
-	return (unsigned int)(sched_prio - KBASE_JS_ATOM_SCHED_PRIO_MIN);
-}
-
 STATIC mali_bool dequeue_job(struct kbase_device *kbdev,
 			     struct kbase_context *kctx,
 			     u32 variants_supported,
@@ -630,7 +597,6 @@ STATIC mali_bool dequeue_job(struct kbase_device *kbdev,
 	struct kbasep_js_device_data *js_devdata;
 	struct kbasep_js_policy_cfs *policy_info;
 	struct kbasep_js_policy_cfs_ctx *ctx_info;
-	unsigned int priority_idx;
 
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
 	KBASE_DEBUG_ASSERT(katom_ptr != NULL);
@@ -640,15 +606,6 @@ STATIC mali_bool dequeue_job(struct kbase_device *kbdev,
 	policy_info = &js_devdata->policy.cfs;
 	ctx_info = &kctx->jctx.sched_info.runpool.policy_ctx.cfs;
 
-	/* Restrict to highest priority level of the atoms that can run on this
-	 * slot, even if no more jobs for that level. In that case, we'd just
-	 * be waiting for those jobs to finish
-	 *
-	 * Slots that run atoms of different types (fragment vs non-fragment)
-	 * are unaffected by the priority level */
-	priority_idx = get_ctx_priority_idx(kbdev, kctx, variants_supported);
-	KBASE_DEBUG_ASSERT(priority_idx < (unsigned int)KBASE_JS_ATOM_SCHED_PRIO_RANGE);
-
 	/* Only submit jobs from contexts that are allowed */
 	if (kbasep_js_is_submit_allowed(js_devdata, kctx) != MALI_FALSE) {
 		/* Check each variant in turn */
@@ -657,12 +614,12 @@ STATIC mali_bool dequeue_job(struct kbase_device *kbdev,
 			struct list_head *job_list;
 
 			variant_idx = ffs(variants_supported) - 1;
-			job_list = &ctx_info->job_list_head[priority_idx][variant_idx];
+			job_list = &ctx_info->job_list_head[variant_idx];
 
 			if (!list_empty(job_list)) {
 				/* Found a context with a matching job */
 				{
-					struct kbase_jd_atom *front_atom =
+					struct kbase_jd_atom *front_atom = 
 							list_entry(job_list->next, struct kbase_jd_atom, sched_info.cfs.list);
 
 					KBASE_TRACE_ADD_SLOT(kbdev, JS_POLICY_DEQUEUE_JOB, front_atom->kctx, front_atom, front_atom->jc, job_slot_idx);
@@ -933,7 +890,6 @@ mali_error kbasep_js_policy_init_ctx(struct kbase_device *kbdev, struct kbase_co
 	struct kbasep_js_policy_cfs_ctx *ctx_info;
 	struct kbasep_js_policy_cfs *policy_info;
 	u32 i;
-	u32 j;
 	int policy;
 
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
@@ -945,9 +901,8 @@ mali_error kbasep_js_policy_init_ctx(struct kbase_device *kbdev, struct kbase_co
 
 	KBASE_TRACE_ADD_REFCOUNT(kbdev, JS_POLICY_INIT_CTX, kctx, NULL, 0u, kbasep_js_policy_trace_get_refcnt(kbdev, kctx));
 
-	for (j = 0; j < KBASE_JS_ATOM_SCHED_PRIO_RANGE; ++j)
-		for (i = 0; i < policy_info->num_core_req_variants; ++i)
-			INIT_LIST_HEAD(&ctx_info->job_list_head[j][i]);
+	for (i = 0; i < policy_info->num_core_req_variants; ++i)
+		INIT_LIST_HEAD(&ctx_info->job_list_head[i]);
 
 	policy = current->policy;
 	if (policy == SCHED_FIFO || policy == SCHED_RR) {
@@ -957,6 +912,9 @@ mali_error kbasep_js_policy_init_ctx(struct kbase_device *kbdev, struct kbase_co
 		ctx_info->process_rt_policy = MALI_FALSE;
 		ctx_info->process_priority = (current->static_prio - MAX_RT_PRIO) - 20;
 	}
+
+	ctx_info->bag_total_priority = 0;
+	ctx_info->bag_total_nr_atoms = 0;
 
 	/* Initial runtime (relative to least-run context runtime)
 	 *
@@ -980,7 +938,6 @@ void kbasep_js_policy_term_ctx(union kbasep_js_policy *js_policy, struct kbase_c
 	struct kbasep_js_policy_cfs_ctx *ctx_info;
 	struct kbasep_js_policy_cfs *policy_info;
 	u32 i;
-	u32 j;
 
 	KBASE_DEBUG_ASSERT(js_policy != NULL);
 	KBASE_DEBUG_ASSERT(kctx != NULL);
@@ -994,9 +951,8 @@ void kbasep_js_policy_term_ctx(union kbasep_js_policy *js_policy, struct kbase_c
 	}
 
 	/* ASSERT that no jobs are present */
-	for (j = 0; j < KBASE_JS_ATOM_SCHED_PRIO_RANGE; ++j)
-		for (i = 0; i < policy_info->num_core_req_variants; ++i)
-			KBASE_DEBUG_ASSERT(list_empty(&ctx_info->job_list_head[j][i]));
+	for (i = 0; i < policy_info->num_core_req_variants; ++i)
+		KBASE_DEBUG_ASSERT(list_empty(&ctx_info->job_list_head[i]));
 
 	/* No work to do */
 }
@@ -1204,7 +1160,6 @@ void kbasep_js_policy_foreach_ctx_job(union kbasep_js_policy *js_policy, struct 
 	struct kbasep_js_policy_cfs_ctx *ctx_info;
 	struct kbase_device *kbdev;
 	u32 i;
-	u32 j;
 
 	KBASE_DEBUG_ASSERT(js_policy != NULL);
 	KBASE_DEBUG_ASSERT(kctx != NULL);
@@ -1215,22 +1170,20 @@ void kbasep_js_policy_foreach_ctx_job(union kbasep_js_policy *js_policy, struct 
 
 	KBASE_TRACE_ADD_REFCOUNT(kbdev, JS_POLICY_FOREACH_CTX_JOBS, kctx, NULL, 0u, kbasep_js_policy_trace_get_refcnt(kbdev, kctx));
 
-	/* Invoke callback on jobs on each variant in turn
-	 * We ignore the priority order, it doesn't matter. */
-	for (j = 0; j < KBASE_JS_ATOM_SCHED_PRIO_RANGE; ++j)
-		for (i = 0; i < policy_info->num_core_req_variants; ++i) {
-			struct list_head *job_list;
-			struct kbase_jd_atom *atom;
-			struct kbase_jd_atom *tmp_iter;
-			job_list = &ctx_info->job_list_head[j][i];
-			/* Invoke callback on all kbase_jd_atoms in this list,
-			 * optionally removing them from the list */
-			list_for_each_entry_safe(atom, tmp_iter, job_list, sched_info.cfs.list) {
-				if (detach_jobs)
-					list_del(&atom->sched_info.cfs.list);
-				callback(kbdev, atom);
-			}
+	/* Invoke callback on jobs on each variant in turn */
+	for (i = 0; i < policy_info->num_core_req_variants; ++i) {
+		struct list_head *job_list;
+		struct kbase_jd_atom *atom;
+		struct kbase_jd_atom *tmp_iter;
+		job_list = &ctx_info->job_list_head[i];
+		/* Invoke callback on all kbase_jd_atoms in this list, optionally
+		 * removing them from the list */
+		list_for_each_entry_safe(atom, tmp_iter, job_list, sched_info.cfs.list) {
+			if (detach_jobs)
+				list_del(&atom->sched_info.cfs.list);
+			callback(kbdev, atom);
 		}
+	}
 
 }
 
@@ -1376,16 +1329,43 @@ mali_error kbasep_js_policy_init_job(const union kbasep_js_policy *js_policy, co
 
 void kbasep_js_policy_register_job(union kbasep_js_policy *js_policy, struct kbase_context *kctx, struct kbase_jd_atom *katom)
 {
-	CSTD_UNUSED(js_policy);
-	CSTD_UNUSED(kctx);
-	CSTD_UNUSED(katom);
+	struct kbasep_js_policy_cfs_ctx *ctx_info;
+
+	KBASE_DEBUG_ASSERT(js_policy != NULL);
+	KBASE_DEBUG_ASSERT(katom != NULL);
+	KBASE_DEBUG_ASSERT(kctx != NULL);
+
+	ctx_info = &kctx->jctx.sched_info.runpool.policy_ctx.cfs;
+
+	/* Adjust context priority to include the new job */
+	ctx_info->bag_total_nr_atoms++;
+	ctx_info->bag_total_priority += katom->nice_prio;
+
+	/* Get average priority and convert to NICE range -20..19 */
+	if (ctx_info->bag_total_nr_atoms)
+		ctx_info->bag_priority = (ctx_info->bag_total_priority / ctx_info->bag_total_nr_atoms) - 20;
 }
 
 void kbasep_js_policy_deregister_job(union kbasep_js_policy *js_policy, struct kbase_context *kctx, struct kbase_jd_atom *katom)
 {
+	struct kbasep_js_policy_cfs_ctx *ctx_info;
+
+	KBASE_DEBUG_ASSERT(js_policy != NULL);
 	CSTD_UNUSED(js_policy);
-	CSTD_UNUSED(kctx);
-	CSTD_UNUSED(katom);
+	KBASE_DEBUG_ASSERT(katom != NULL);
+	KBASE_DEBUG_ASSERT(kctx != NULL);
+
+	ctx_info = &kctx->jctx.sched_info.runpool.policy_ctx.cfs;
+
+	/* Adjust context priority to no longer include removed job */
+	KBASE_DEBUG_ASSERT(ctx_info->bag_total_nr_atoms > 0);
+	ctx_info->bag_total_nr_atoms--;
+	ctx_info->bag_total_priority -= katom->nice_prio;
+	KBASE_DEBUG_ASSERT(ctx_info->bag_total_priority >= 0);
+
+	/* Get average priority and convert to NICE range -20..19 */
+	if (ctx_info->bag_total_nr_atoms)
+		ctx_info->bag_priority = (ctx_info->bag_total_priority / ctx_info->bag_total_nr_atoms) - 20;
 }
 KBASE_EXPORT_TEST_API(kbasep_js_policy_deregister_job)
 
@@ -1415,8 +1395,7 @@ mali_bool kbasep_js_policy_dequeue_job(struct kbase_device *kbdev,
 		variants_supported = get_slot_to_variant_lookup(policy_info->slot_to_variant_lookup_ss_state, job_slot_idx);
 	}
 
-	/* First pass through the runpool we consider the realtime priority
-	 * ctxs */
+	/* First pass through the runpool we consider the realtime priority jobs */
 	list_for_each(pos, &policy_info->scheduled_ctxs_head) {
 		kctx = list_entry(pos, struct kbase_context, jctx.sched_info.runpool.policy_ctx.cfs.list);
 		if (kctx->jctx.sched_info.runpool.policy_ctx.cfs.process_rt_policy) {
@@ -1427,8 +1406,7 @@ mali_bool kbasep_js_policy_dequeue_job(struct kbase_device *kbdev,
 		}
 	}
 
-	/* Second pass through the runpool we consider the non-realtime
-	 * priority ctxs */
+	/* Second pass through the runpool we consider the non-realtime priority jobs */
 	list_for_each(pos, &policy_info->scheduled_ctxs_head) {
 		kctx = list_entry(pos, struct kbase_context, jctx.sched_info.runpool.policy_ctx.cfs.list);
 		if (kctx->jctx.sched_info.runpool.policy_ctx.cfs.process_rt_policy == MALI_FALSE) {
@@ -1448,7 +1426,6 @@ void kbasep_js_policy_enqueue_job(union kbasep_js_policy *js_policy, struct kbas
 	struct kbasep_js_policy_cfs_job *job_info;
 	struct kbasep_js_policy_cfs_ctx *ctx_info;
 	struct kbase_context *parent_ctx;
-	unsigned int priority_idx;
 
 	KBASE_DEBUG_ASSERT(js_policy != NULL);
 	KBASE_DEBUG_ASSERT(katom != NULL);
@@ -1457,16 +1434,12 @@ void kbasep_js_policy_enqueue_job(union kbasep_js_policy *js_policy, struct kbas
 
 	job_info = &katom->sched_info.cfs;
 	ctx_info = &parent_ctx->jctx.sched_info.runpool.policy_ctx.cfs;
-	priority_idx = (unsigned int)(katom->sched_priority
-			- KBASE_JS_ATOM_SCHED_PRIO_MIN);
-	KBASE_DEBUG_ASSERT(priority_idx < (unsigned int)KBASE_JS_ATOM_SCHED_PRIO_RANGE);
 
 	{
 		struct kbase_device *kbdev = container_of(js_policy, struct kbase_device, js_data.policy);
 		KBASE_TRACE_ADD(kbdev, JS_POLICY_ENQUEUE_JOB, katom->kctx, katom, katom->jc, 0);
 	}
-	list_add_tail(&katom->sched_info.cfs.list,
-			&ctx_info->job_list_head[priority_idx][job_info->cached_variant_idx]);
+	list_add_tail(&katom->sched_info.cfs.list, &ctx_info->job_list_head[job_info->cached_variant_idx]);
 }
 
 void kbasep_js_policy_log_job_result(union kbasep_js_policy *js_policy, struct kbase_jd_atom *katom, u64 time_spent_us)
@@ -1500,6 +1473,9 @@ mali_bool kbasep_js_policy_ctx_has_priority(union kbasep_js_policy *js_policy, s
 	new_ctx_info = &new_ctx->jctx.sched_info.runpool.policy_ctx.cfs;
 
 	if ((current_ctx_info->process_rt_policy == MALI_FALSE) && (new_ctx_info->process_rt_policy == MALI_TRUE))
+		return MALI_TRUE;
+
+	if ((current_ctx_info->process_rt_policy == new_ctx_info->process_rt_policy) && (current_ctx_info->bag_priority > new_ctx_info->bag_priority))
 		return MALI_TRUE;
 
 	return MALI_FALSE;

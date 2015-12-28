@@ -26,9 +26,6 @@
 #include <mali_midg_regmap.h>
 
 #include <mali_kbase_pm.h>
-#if SLSI_INTEGRATION
-#include <platform/mali_kbase_platform.h>
-#endif
 
 #if KBASE_PM_EN
 
@@ -290,9 +287,7 @@ int kbase_pm_context_active_handle_suspend(struct kbase_device *kbdev, enum kbas
 		 * the policy */
 		kbase_pm_update_active(kbdev);
 
-#ifndef SEPERATED_UTILIZATION
 		kbasep_pm_record_gpu_active(kbdev);
-#endif
 	}
 
 	mutex_unlock(&kbdev->pm.lock);
@@ -334,9 +329,7 @@ void kbase_pm_context_idle(struct kbase_device *kbdev)
 		/* Last context has gone idle */
 		kbase_pm_update_active(kbdev);
 
-#ifndef SEPERATED_UTILIZATION
 		kbasep_pm_record_gpu_idle(kbdev);
-#endif
 
 		/* Wake up anyone waiting for this to become 0 (e.g. suspend). The
 		 * waiters must synchronize with us by locking the pm.lock after
@@ -383,30 +376,6 @@ void kbase_pm_suspend(struct kbase_device *kbdev)
 
 	KBASE_DEBUG_ASSERT(kbdev);
 
-#if SLSI_INTEGRATION
-	if (kbdev->hwcnt.prev_mm) {
-		struct exynos_context *platform = (struct exynos_context *) kbdev->platform_context;
-
-		mutex_lock(&kbdev->hwcnt.mlock);
-
-		kbdev->hwcnt.s_enable_for_utilization = kbdev->hwcnt.enable_for_utilization;
-
-		kbdev->hwcnt.enable_for_utilization = FALSE;
-		kbdev->hwcnt.enable_for_gpr = FALSE;
-		kbdev->hwcnt.condition_to_dump = FALSE;
-		kbdev->hwcnt.cnt_for_stop = 0;
-		kbdev->hwcnt.cnt_for_bt_start = 0;
-		kbdev->hwcnt.cnt_for_bt_stop = 0;
-		platform->hwcnt_bt_clk = FALSE;
-
-		/* Suspend any counter collection that might be happening */
-		if (kbdev->hwcnt.kspace_addr)
-			kbase_instr_hwcnt_suspend(kbdev);
-
-		mutex_unlock(&kbdev->hwcnt.mlock);
-	}
-#endif
-
 	mutex_lock(&kbdev->pm.lock);
 	KBASE_DEBUG_ASSERT(!kbase_pm_is_suspending(kbdev));
 	kbdev->pm.suspending = MALI_TRUE;
@@ -420,9 +389,6 @@ void kbase_pm_suspend(struct kbase_device *kbdev)
 	 * the PM active count references */
 	kbasep_js_suspend(kbdev);
 
-#if SLSI_INTEGRATION
-	if (!kbdev->hwcnt.prev_mm)
-#endif
 	/* Suspend any counter collection that might be happening */
 	kbase_instr_hwcnt_suspend(kbdev);
 
@@ -470,20 +436,6 @@ void kbase_pm_resume(struct kbase_device *kbdev)
 		kbase_pm_context_active(kbdev);
 	}
 
-#if SLSI_INTEGRATION
-	if (kbdev->hwcnt.prev_mm) {
-		mutex_lock(&kbdev->hwcnt.mlock);
-
-		if ((kbdev->hwcnt.enable_for_gpr == FALSE) && (kbdev->hwcnt.s_enable_for_utilization))
-			kbdev->hwcnt.enable_for_utilization = TRUE;
-		else
-			kbdev->hwcnt.enable_for_utilization = FALSE;
-
-		kbase_pm_policy_change(kbdev, 2);
-
-		mutex_unlock(&kbdev->hwcnt.mlock);
-	} else
-#endif
 	/* Re-enable instrumentation, if it was previously disabled */
 	kbase_instr_hwcnt_resume(kbdev);
 

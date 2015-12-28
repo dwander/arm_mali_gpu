@@ -125,17 +125,13 @@ struct kbasep_pm_metrics_data {
 
 	spinlock_t lock;
 
+#ifdef CONFIG_MALI_MIDGARD_DVFS
 	struct hrtimer timer;
-#if defined(SLSI_SUBSTITUTE)
-	struct timer_list tlist;
-#endif
 	mali_bool timer_active;
+#endif
 
 	void *platform_data;
 	struct kbase_device *kbdev;
-#if defined(CL_UTILIZATION_BOOST_BY_TIME_WEIGHT)
-	atomic_t time_compute_jobs, time_vertex_jobs, time_fragment_jobs;
-#endif
 };
 
 /** Actions for DVFS.
@@ -702,30 +698,6 @@ void kbasep_pm_record_gpu_active(struct kbase_device *kbdev);
  */
 void kbasep_pm_record_gpu_idle(struct kbase_device *kbdev);
 
-#ifdef SEPERATED_UTILIZATION
-/** Notify the Power Management Metrics System that the GPU active state might
- * have changed.
- *
- * If it has indeed changed since the last time the Metrics System was
- * notified, then it calculates the active/idle time. Otherwise, it does
- * nothing. For example, the caller can signal going idle when the last non-hw
- * counter context deschedules, and then signals going idle again when the
- * hwcounter context itself also deschedules.
- *
- * If there is only one context left running and that is HW counters
- * collection, then the caller should set @p is_active to MALI_FALSE. This has
- * a side effect that counter collecting contexts that also run jobs will be
- * invisible to utilization metrics. Note that gator cannot run jobs itself, so
- * is unaffected by this.
- *
- * @param kbdev     The kbase device structure for the device (must be a valid
- *                  pointer)
- * @param is_active Indicator that GPU must be recorded active (MALI_TRUE), or
- *                  idle (MALI_FALSE)
- */
-void kbase_pm_record_gpu_state(struct kbase_device *kbdev, mali_bool is_active);
-#endif
-
 /** Function to be called by the frame buffer driver to update the vsync metric.
  *
  * This function should be called by the frame buffer driver to update whether the system is hitting the vsync target
@@ -891,13 +863,13 @@ void kbase_pm_do_poweron(struct kbase_device *kbdev, mali_bool is_resume);
  */
 void kbase_pm_do_poweroff(struct kbase_device *kbdev, mali_bool is_suspend);
 
-#ifndef SLSI_INTEGRATION
 #ifdef CONFIG_PM_DEVFREQ
 void kbase_pm_get_dvfs_utilisation(struct kbase_device *kbdev,
 		unsigned long *total, unsigned long *busy);
 void kbase_pm_reset_dvfs_utilisation(struct kbase_device *kbdev);
 #endif
-#endif /* SLSI_INTEGRATION */
+
+#ifdef CONFIG_MALI_MIDGARD_DVFS
 
 /**
  * Function provided by platform specific code when DVFS is enabled to allow
@@ -909,10 +881,8 @@ void kbase_pm_reset_dvfs_utilisation(struct kbase_device *kbdev);
  * @param util_cl_share   The current calculated cl share of utilisation per core group.
  * @return                Returns 0 on failure and non zero on success.
  */
-int kbase_platform_dvfs_event(struct kbase_device *kbdev, u32 utilisation
-#if SLSI_INTEGRATION
-	);
-#else
-	, u32 util_gl_share, u32 util_cl_share[2]);
+
+int kbase_platform_dvfs_event(struct kbase_device *kbdev, u32 utilisation,
+	u32 util_gl_share, u32 util_cl_share[2]);
 #endif
 #endif				/* _KBASE_PM_H_ */

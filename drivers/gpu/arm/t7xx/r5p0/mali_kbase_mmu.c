@@ -149,7 +149,6 @@ static void page_fault_worker(struct work_struct *data)
 
 	kbase_gpu_vm_lock(kctx);
 
-	/* find the region object for this VA */
 	region = kbase_region_tracker_find_region_enclosing_address(kctx, faulting_as->fault_addr);
 	if (NULL == region || region->flags & KBASE_REG_FREE) {
 		kbase_gpu_vm_unlock(kctx);
@@ -185,12 +184,11 @@ static void page_fault_worker(struct work_struct *data)
 	fault_rel_pfn = fault_pfn - region->start_pfn;
 
 	if (fault_rel_pfn < kbase_reg_current_backed_size(region)) {
-#ifdef CONFIG_MALI_DEBUG
-		dev_warn(kbdev->dev, "Page fault @ 0x%llx in allocated region 0x%llx-0x%llx of growable TMEM: Ignoring",
+		dev_dbg(kbdev->dev, "Page fault @ 0x%llx in allocated region 0x%llx-0x%llx of growable TMEM: Ignoring",
 				faulting_as->fault_addr, region->start_pfn,
 				region->start_pfn +
 				kbase_reg_current_backed_size(region));
-#endif /* CONFIG_MALI_DEBUG */
+
 		kbase_mmu_hw_clear_fault(kbdev, faulting_as, kctx,
 				KBASE_MMU_FAULT_TYPE_PAGE);
 		/* [1] in case another page fault occurred while we were
@@ -235,9 +233,6 @@ static void page_fault_worker(struct work_struct *data)
 
 	if (MALI_ERROR_NONE == kbase_alloc_phy_pages_helper(region->alloc, new_pages)) {
 		u32 op;
-#if SLSI_INTEGRATION
-		kbase_alloc_phy_pages_helper_gpu(region, new_pages);
-#endif
 
 		/* alloc success */
 		KBASE_DEBUG_ASSERT(kbase_reg_current_backed_size(region) <= region->nr_pages);
@@ -250,9 +245,6 @@ static void page_fault_worker(struct work_struct *data)
 		if (MALI_ERROR_NONE != err) {
 			/* failed to insert pages, handle as a normal PF */
 			mutex_unlock(&faulting_as->transaction_mutex);
-#if SLSI_INTEGRATION
-			kbase_free_phy_pages_helper_gpu(region, new_pages);
-#endif
 			kbase_free_phy_pages_helper(region->alloc, new_pages);
 			kbase_gpu_vm_unlock(kctx);
 			/* The locked VA region will be unlocked and the cache invalidated in here */

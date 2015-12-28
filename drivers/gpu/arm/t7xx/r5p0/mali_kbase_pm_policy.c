@@ -149,7 +149,6 @@ STATIC INLINE void kbase_timeline_pm_cores_func(struct kbase_device *kbdev,
 
 #endif /* CONFIG_MALI_TRACE_TIMELINE */
 
-#if 0 /* MALI_SEC */
 static enum hrtimer_restart kbasep_pm_do_gpu_poweroff_callback(struct hrtimer *timer)
 {
 	struct kbase_device *kbdev;
@@ -208,7 +207,6 @@ static enum hrtimer_restart kbasep_pm_do_gpu_poweroff_callback(struct hrtimer *t
 
 	return HRTIMER_NORESTART;
 }
-#endif /* MALI_SEC */
 
 static void kbasep_pm_do_gpu_poweroff_wq(struct work_struct *data)
 {
@@ -220,7 +218,6 @@ static void kbasep_pm_do_gpu_poweroff_wq(struct work_struct *data)
 
 	mutex_lock(&kbdev->pm.lock);
 
-#if 0 /* MALI_SEC */
 	if (kbdev->pm.gpu_poweroff_pending == 0) {
 		mutex_unlock(&kbdev->pm.lock);
 		return;
@@ -234,84 +231,30 @@ static void kbasep_pm_do_gpu_poweroff_wq(struct work_struct *data)
 	}
 
 	KBASE_DEBUG_ASSERT(kbdev->pm.gpu_poweroff_pending == 0);
-#endif /* MALI_SEC */
 
 	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
 
 	/* Only power off the GPU if a request is still pending */
-	if (kbdev->pm.pm_current_policy->get_core_active(kbdev) == MALI_FALSE
-#if SLSI_INTEGRATION
-		&& (kbdev->pm.gpu_poweroff_pending != MALI_FALSE)
-#endif
-	)
+	if (kbdev->pm.pm_current_policy->get_core_active(kbdev) == MALI_FALSE)
 		do_poweroff = MALI_TRUE;
 
-#if SLSI_INTEGRATION
-	kbdev->pm.gpu_poweroff_pending = MALI_FALSE;
-#endif
 	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
 
 	if (do_poweroff != MALI_FALSE) {
-#if 0 /* MALI_SEC */
 		kbdev->pm.poweroff_timer_needed = MALI_FALSE;
-#endif /* MALI_SEC */
 		/* Power off the GPU */
-#if 0 /* MALI_SEC (SOC_NAME == 5430) */
-		kbdev->pm.shader_poweroff_pending = 0;
-#endif /* SOC_NAME */
 		kbase_pm_do_poweroff(kbdev, MALI_FALSE);
-#if 0 /* MALI_SEC */
 		hrtimer_cancel(&kbdev->pm.gpu_poweroff_timer);
-#endif /* MALI_SEC */
 	}
 
 	mutex_unlock(&kbdev->pm.lock);
 }
 
-#if SLSI_INTEGRATION
-static enum hrtimer_restart kbasep_pm_do_gpu_poweroff_callback(struct hrtimer *timer)
-{
-	struct kbase_device *kbdev;
-	unsigned long flags;
-
-	kbdev = container_of(timer, struct kbase_device, pm.gpu_poweroff_timer);
-
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
-
-	if (kbdev->pm.shader_poweroff_pending != 0) {
-		u64 prev_shader_state = kbdev->pm.desired_shader_state;
-		mali_bool cores_are_available;
-
-		kbdev->pm.desired_shader_state &= ~kbdev->pm.shader_poweroff_pending;
-		kbdev->pm.shader_poweroff_pending = 0;
-
-		if (prev_shader_state != kbdev->pm.desired_shader_state ||
-				kbdev->pm.ca_in_transition != MALI_FALSE) {
-			KBASE_TIMELINE_PM_CHECKTRANS(kbdev, SW_FLOW_PM_CHECKTRANS_PM_RELEASE_CORES_DEFERRED_START);
-			cores_are_available = kbase_pm_check_transitions_nolock(kbdev);
-			KBASE_TIMELINE_PM_CHECKTRANS(kbdev, SW_FLOW_PM_CHECKTRANS_PM_RELEASE_CORES_DEFERRED_END);
-		}
-
-		/* Don't need 'cores_are_available', because we don't return anything */
-		CSTD_UNUSED(cores_are_available);
-	}
-
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-
-	return HRTIMER_NORESTART;
-}
-#endif /* SLSI_INTEGRATION */
-
 mali_error kbase_pm_policy_init(struct kbase_device *kbdev)
 {
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
-#if SLSI_INTEGRATION
-/* MALI_SEC */
-/* WQ_HIGHPRI | WQ_UNBOUND -> WQ_HIGHPRI */
-	kbdev->pm.gpu_poweroff_wq = alloc_workqueue("kbase_pm_do_poweroff", WQ_HIGHPRI, 1);
-#else
+
 	kbdev->pm.gpu_poweroff_wq = alloc_workqueue("kbase_pm_do_poweroff", WQ_HIGHPRI | WQ_UNBOUND, 1);
-#endif
 	if (NULL == kbdev->pm.gpu_poweroff_wq)
 		return MALI_ERROR_OUT_OF_MEMORY;
 	INIT_WORK(&kbdev->pm.gpu_poweroff_work, kbasep_pm_do_gpu_poweroff_wq);
@@ -319,20 +262,15 @@ mali_error kbase_pm_policy_init(struct kbase_device *kbdev)
 	hrtimer_init(&kbdev->pm.gpu_poweroff_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	kbdev->pm.gpu_poweroff_timer.function = kbasep_pm_do_gpu_poweroff_callback;
 
-	kbdev->pm.pm_current_policy = policy_list[2];
+	kbdev->pm.pm_current_policy = policy_list[0];
 
 	kbdev->pm.pm_current_policy->init(kbdev);
 
 	kbdev->pm.gpu_poweroff_time = HR_TIMER_DELAY_NSEC(kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_PM_GPU_POWEROFF_TICK_NS));
-#if SLSI_INTEGRATION
-	kbdev->hwcnt.prev_policy = kbdev->pm.pm_current_policy;
-#endif
 
-
-#if 0 /* MALI_SEC */
 	kbdev->pm.poweroff_shader_ticks = kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_PM_POWEROFF_TICK_SHADER);
 	kbdev->pm.poweroff_gpu_ticks = kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_PM_POWEROFF_TICK_GPU);
-#endif /* MALI_SEC */
+
 	return MALI_ERROR_NONE;
 }
 
@@ -346,30 +284,19 @@ void kbase_pm_cancel_deferred_poweroff(struct kbase_device *kbdev)
 	unsigned long flags;
 
 	lockdep_assert_held(&kbdev->pm.lock);
-#if 0 /* MALI_SEC */
+
 	kbdev->pm.poweroff_timer_needed = MALI_FALSE;
 	hrtimer_cancel(&kbdev->pm.gpu_poweroff_timer);
 
 	/* If wq is already running but is held off by pm.lock, make sure it has no effect */
 	kbdev->pm.gpu_poweroff_pending = 0;
-#endif /* MALI_SEC */
+
 	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
 
-#if SLSI_INTEGRATION
-	if (kbdev->pm.gpu_poweroff_pending)
-		kbdev->pm.gpu_poweroff_pending = MALI_FALSE;
-
-	if (kbdev->pm.shader_poweroff_pending)
-		kbdev->pm.shader_poweroff_pending = 0;
-#else
 	kbdev->pm.shader_poweroff_pending = 0;
 	kbdev->pm.shader_poweroff_pending_time = 0;
-#endif /* SLSI_INTEGRATION */
 
 	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-#if SLSI_INTEGRATION
-	hrtimer_cancel(&kbdev->pm.gpu_poweroff_timer);
-#endif /* SLSI_INTEGRATION */
 }
 
 void kbase_pm_update_active(struct kbase_device *kbdev)
@@ -389,48 +316,35 @@ void kbase_pm_update_active(struct kbase_device *kbdev)
 	if (active != MALI_FALSE) {
 		spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
 
-		if (kbdev->pm.gpu_poweroff_pending == MALI_TRUE) {
+		if (kbdev->pm.gpu_poweroff_pending) {
 			/* Cancel any pending power off request */
-			kbdev->pm.gpu_poweroff_pending = MALI_FALSE;
+			kbdev->pm.gpu_poweroff_pending = 0;
+
 			/* If a request was pending then the GPU was still powered, so no need to continue */
 			return;
 		}
-#if 0 /* MALI_SEC */
-	if (!kbdev->pm.poweroff_timer_needed && !kbdev->pm.gpu_powered) {
+
+		if (!kbdev->pm.poweroff_timer_needed && !kbdev->pm.gpu_powered) {
 			kbdev->pm.poweroff_timer_needed = MALI_TRUE;
 			hrtimer_start(&kbdev->pm.gpu_poweroff_timer, kbdev->pm.gpu_poweroff_time, HRTIMER_MODE_REL);
 		}
-#endif /* MALI_SEC */
+
 		/* Power on the GPU and any cores requested by the policy */
 		kbase_pm_do_poweron(kbdev, MALI_FALSE);
 	} else {
-#if SLSI_INTEGRATION
-		mali_bool cancel_timer = MALI_FALSE;
-#endif
 		/* It is an error for the power policy to power off the GPU
 		 * when there are contexts active */
 		KBASE_DEBUG_ASSERT(kbdev->pm.active_count == 0);
 
 		if (kbdev->pm.shader_poweroff_pending) {
-#if SLSI_INTEGRATION
-			cancel_timer = MALI_TRUE;
-#endif
 			kbdev->pm.shader_poweroff_pending = 0;
-#if 0 /* MALI_SEC */
 			kbdev->pm.shader_poweroff_pending_time = 0;
-#endif /* MALI_SEC */
 		}
 
 		spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-#if SLSI_INTEGRATION
-		if (cancel_timer)
-			hrtimer_cancel(&kbdev->pm.gpu_poweroff_timer);
-#endif
+
+
 		/* Request power off */
-#if SLSI_INTEGRATION
-		kbdev->pm.gpu_poweroff_pending = MALI_TRUE;
-		queue_work(kbdev->pm.gpu_poweroff_wq, &kbdev->pm.gpu_poweroff_work);
-#else
 		if (kbdev->pm.gpu_powered) {
 			kbdev->pm.gpu_poweroff_pending = kbdev->pm.poweroff_gpu_ticks;
 			if (!kbdev->pm.poweroff_timer_needed) {
@@ -440,7 +354,6 @@ void kbase_pm_update_active(struct kbase_device *kbdev)
 				hrtimer_start(&kbdev->pm.gpu_poweroff_timer, kbdev->pm.gpu_poweroff_time, HRTIMER_MODE_REL);
 			}
 		}
-#endif /* SLSI_INTEGRATION */
 	}
 }
 
@@ -466,37 +379,21 @@ void kbase_pm_update_cores_state_nolock(struct kbase_device *kbdev)
 
 	/* Are any cores being powered on? */
 	if (~kbdev->pm.desired_shader_state & desired_bitmap ||
-			kbdev->pm.ca_in_transition != MALI_FALSE) {
-#if SLSI_INTEGRATION
+	    kbdev->pm.ca_in_transition != MALI_FALSE) {
 		/* Check if we are powering off any cores before updating shader state */
 		if (kbdev->pm.desired_shader_state & ~desired_bitmap) {
 			/* Start timer to power off cores */
 			kbdev->pm.shader_poweroff_pending |= (kbdev->pm.desired_shader_state & ~desired_bitmap);
+			kbdev->pm.shader_poweroff_pending_time = kbdev->pm.poweroff_shader_ticks;
 		}
-#endif
 
 		kbdev->pm.desired_shader_state = desired_bitmap;
 
 		/* If any cores are being powered on, transition immediately */
 		cores_are_available = kbase_pm_check_transitions_nolock(kbdev);
-
-#if !SLSI_INTEGRATION
-		/* Ensure timer does not power off wanted cores */
-		if (kbdev->pm.shader_poweroff_pending != 0) {
-			kbdev->pm.shader_poweroff_pending &= ~kbdev->pm.desired_shader_state;
-		}
-#endif
-
-#if 0 /* MALI_SEC */
-			if (kbdev->pm.shader_poweroff_pending == 0)
-				kbdev->pm.shader_poweroff_pending_time = 0;
-#endif /* MALI_SEC */
 	} else if (kbdev->pm.desired_shader_state & ~desired_bitmap) {
 		/* Start timer to power off cores */
 		kbdev->pm.shader_poweroff_pending |= (kbdev->pm.desired_shader_state & ~desired_bitmap);
-#if SLSI_INTEGRATION
-		hrtimer_start(&kbdev->pm.gpu_poweroff_timer, kbdev->pm.gpu_poweroff_time, HRTIMER_MODE_REL);
-#else
 		kbdev->pm.shader_poweroff_pending_time = kbdev->pm.poweroff_shader_ticks;
 	} else if (kbdev->pm.active_count == 0 && desired_bitmap != 0 && kbdev->pm.poweroff_timer_needed) {
 		/* If power policy is keeping cores on despite there being no
@@ -513,15 +410,7 @@ void kbase_pm_update_cores_state_nolock(struct kbase_device *kbdev)
 		kbdev->pm.shader_poweroff_pending &= ~(kbdev->pm.desired_shader_state & desired_bitmap);
 		if (kbdev->pm.shader_poweroff_pending == 0)
 			kbdev->pm.shader_poweroff_pending_time = 0;
-#endif /* SLSI_INTEGRATION */
 	}
-
-#if SLSI_INTEGRATION
-	/* Ensure timer does not power off wanted cores and make sure to power off unwanted cores */
-	if (kbdev->pm.shader_poweroff_pending != 0) {
-		kbdev->pm.shader_poweroff_pending &= ~(kbdev->pm.desired_shader_state & desired_bitmap);
-	}
-#endif
 
 	/* Don't need 'cores_are_available', because we don't return anything */
 	CSTD_UNUSED(cores_are_available);
@@ -930,23 +819,4 @@ void kbase_pm_release_l2_caches(struct kbase_device *kbdev)
 }
 
 KBASE_EXPORT_TEST_API(kbase_pm_release_l2_caches)
-
-#if SLSI_INTEGRATION
-mali_error kbase_pm_policy_change(struct kbase_device *kbdev, u32 mode)
-{
-	KBASE_DEBUG_ASSERT(kbdev != NULL);
-
-	if (mode == 1) {
-		if (strncmp(kbdev->hwcnt.prev_policy->name, "always_on", strlen("always_on"))) {
-			kbase_pm_set_policy(kbdev, policy_list[1]);
-		}
-	} else if (mode == 2) {
-		if (kbdev->hwcnt.prev_policy->name != kbdev->pm.pm_current_policy->name)
-			kbase_pm_set_policy(kbdev, kbdev->hwcnt.prev_policy);
-	}
-
-	return MALI_ERROR_NONE;
-}KBASE_EXPORT_SYMBOL(kbase_pm_policy_change)
-#endif
-
 #endif /* KBASE_PM_EN */
