@@ -619,6 +619,18 @@ void kbase_free_alloced_region(struct kbase_va_region *reg)
 		kbase_mem_phy_alloc_put(reg->gpu_alloc);
 		/* To detect use-after-free in debug builds */
 		KBASE_DEBUG_CODE(reg->flags |= KBASE_REG_FREE);
+		/* MALI_SEC_SECURE_RENDERING */
+#if MALI_SEC_ASP_SECURE_RENDERING
+		if ( (reg->flags & KBASE_REG_SECURE) && !(reg->flags & KBASE_REG_SECURE_CRC)) {
+			struct kbase_device *kbdev = reg->kctx->kbdev;
+			if (kbdev->secure_mode_support == true && kbdev->secure_ops != NULL) {
+				int err = -EINVAL;
+				err = kbdev->secure_ops->secure_mem_disable(kbdev, reg);
+				if (err)
+					dev_warn(kbdev->dev, "Failed to disable secure memory : 0x%08x\n", err);
+			}
+		}
+#endif
 	}
 	kfree(reg);
 }
@@ -758,6 +770,8 @@ int kbase_gpu_munmap(struct kbase_context *kctx, struct kbase_va_region *reg)
 				kbase_mem_phy_alloc_gpu_unmapped(reg->gpu_alloc->imported.alias.aliased[i].alloc);
 	} else {
 		err = kbase_mmu_teardown_pages(kctx, reg->start_pfn, kbase_reg_current_backed_size(reg));
+/* MALI_SEC_INTEGRATION */
+		if (reg->gpu_alloc)
 		kbase_mem_phy_alloc_gpu_unmapped(reg->gpu_alloc);
 	}
 
@@ -1325,9 +1339,12 @@ bool kbase_check_alloc_flags(unsigned long flags)
 
 bool kbase_check_import_flags(unsigned long flags)
 {
+/* MALI_SEC_SECURE_RENDERING */
+#if !MALI_SEC_ASP_SECURE_RENDERING
 	/* Only known input flags should be set. */
 	if (flags & ~BASE_MEM_FLAGS_INPUT_MASK)
 		return false;
+#endif
 
 	/* At least one flag should be set */
 	if (flags == 0)

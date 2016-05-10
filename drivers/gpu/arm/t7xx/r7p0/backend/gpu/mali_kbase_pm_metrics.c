@@ -88,6 +88,11 @@ int kbasep_pm_metrics_init(struct kbase_device *kbdev)
 
 	spin_lock_init(&kbdev->pm.backend.metrics.lock);
 
+	/* MALI_SEC_INTEGRATION */
+	if(kbdev->vendor_callbacks->pm_metrics_init)
+		kbdev->vendor_callbacks->pm_metrics_init(kbdev);
+	else
+	{
 #ifdef CONFIG_MALI_MIDGARD_DVFS
 	kbdev->pm.backend.metrics.timer_active = true;
 	hrtimer_init(&kbdev->pm.backend.metrics.timer, CLOCK_MONOTONIC,
@@ -98,6 +103,11 @@ int kbasep_pm_metrics_init(struct kbase_device *kbdev)
 			HR_TIMER_DELAY_MSEC(kbdev->pm.dvfs_period),
 			HRTIMER_MODE_REL);
 #endif /* CONFIG_MALI_MIDGARD_DVFS */
+	}
+
+	/* MALI_SEC_INTEGRATION */
+	if(kbdev->vendor_callbacks->cl_boost_init)
+		kbdev->vendor_callbacks->cl_boost_init(kbdev);
 
 	return 0;
 }
@@ -117,6 +127,10 @@ void kbasep_pm_metrics_term(struct kbase_device *kbdev)
 
 	hrtimer_cancel(&kbdev->pm.backend.metrics.timer);
 #endif /* CONFIG_MALI_MIDGARD_DVFS */
+
+	/* MALI_SEC_INTEGRATION */
+	if(kbdev->vendor_callbacks->pm_metrics_term)
+		kbdev->vendor_callbacks->pm_metrics_term(kbdev);
 }
 
 KBASE_EXPORT_TEST_API(kbasep_pm_metrics_term);
@@ -346,7 +360,11 @@ static void kbase_pm_metrics_active_calc(struct kbase_device *kbdev)
 	kbdev->pm.backend.metrics.active_gl_ctx[1] = 0;
 	kbdev->pm.backend.metrics.active_cl_ctx[0] = 0;
 	kbdev->pm.backend.metrics.active_cl_ctx[1] = 0;
+#ifdef MALI_SEC_UTILIZATION
+	/*Setting gpu_active here may show real GPU utilization but it can't make full utilization(100%) */
+#else
 	kbdev->pm.backend.metrics.gpu_active = false;
+#endif
 
 	for (js = 0; js < BASE_JM_MAX_NR_SLOTS; js++) {
 		struct kbase_jd_atom *katom = kbase_gpu_inspect(kbdev, js, 0);
@@ -371,7 +389,11 @@ static void kbase_pm_metrics_active_calc(struct kbase_device *kbdev)
 				WARN_ON(js >= 2);
 				kbdev->pm.backend.metrics.active_gl_ctx[js] = 1;
 			}
+#ifdef MALI_SEC_UTILIZATION
+			/*Setting gpu_active here may show real GPU utilization but it can't make full utilization(100%) */
+#else
 			kbdev->pm.backend.metrics.gpu_active = true;
+#endif
 		}
 	}
 }

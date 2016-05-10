@@ -64,6 +64,34 @@
 #ifdef CONFIG_GPU_TRACEPOINTS
 #include <trace/events/gpu.h>
 #endif
+
+/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
+#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
+/**
+ * @SRUK-android-graphics
+ * Events definition for MALI kernel level systrace stupport
+ * Current implementation only tracks job start/stop events
+ */
+
+#define SYSTRACE_EVENT_TYPE_SINGLE  0
+#define SYSTRACE_EVENT_TYPE_START   1
+#define SYSTRACE_EVENT_TYPE_STOP    2
+#define SYSTRACE_EVENT_TYPE_SUSPEND 3
+#define SYSTRACE_EVENT_TYPE_RESUME  4
+
+enum {
+        GPU_UNIT_NONE = 0,
+        GPU_UNIT_VP,
+        GPU_UNIT_FP,
+        GPU_UNIT_CL,
+        NUMBER_OF_GPU_UNITS
+};
+
+void kbase_systrace_mali_job_slots_event(u8 job_event, u8 job_slot, const struct kbase_context *kctx, u8 atom_id, u64 start_timestamp, u8 dep_0_id, u8 dep_0_type, u8 dep_1_id, u8 dep_1_type, u32 gles_ctx_handle);
+
+#endif //CONFIG_MALI_SYSTRACE_SUPPORT
+/* SRUK-MALI_SYSTRACE_SUPPORT }*/
+
 /**
  * @page page_base_kernel_main Kernel-side Base (KBase) APIs
  *
@@ -409,6 +437,11 @@ void kbasep_trace_debugfs_init(struct kbase_device *kbdev);
 	kbasep_trace_add(kbdev, KBASE_TRACE_CODE(code), ctx, katom, gpu_addr, \
 			0, 0, 0, info_val)
 
+/* MALI_SEC_INTEGRATION */
+#define KBASE_TRACE_ADD_EXYNOS(kbdev, code, ctx, katom, gpu_addr, info_val)	\
+	kbasep_trace_add(kbdev, KBASE_TRACE_CODE(code), ctx, katom, gpu_addr, \
+			0, 0, 0, info_val)
+
 /** Clear the trace */
 #define KBASE_TRACE_CLEAR(kbdev) \
 	kbasep_trace_clear(kbdev)
@@ -507,6 +540,18 @@ void kbasep_trace_clear(struct kbase_device *kbdev);
 		CSTD_NOP(0);\
 	} while (0)
 
+/* MALI_SEC_INTEGRATION */
+#define KBASE_TRACE_ADD_EXYNOS(kbdev, code, subcode, ctx, katom, val)\
+	do {\
+		CSTD_UNUSED(kbdev);\
+		CSTD_NOP(code);\
+		CSTD_UNUSED(subcode);\
+		CSTD_UNUSED(ctx);\
+		CSTD_UNUSED(katom);\
+		CSTD_UNUSED(val);\
+		CSTD_NOP(0);\
+	} while (0)
+
 #define KBASE_TRACE_CLEAR(kbdev)\
 	do {\
 		CSTD_UNUSED(kbdev);\
@@ -534,4 +579,6 @@ void kbasep_trace_dump(struct kbase_device *kbdev);
 void kbase_set_driver_inactive(struct kbase_device *kbdev, bool inactive);
 #endif /* CONFIG_MALI_DEBUG */
 
+/* MALI_SEC_INTEGRATION */
+void gpu_dump_register_hooks(struct kbase_device *kbdev);
 #endif

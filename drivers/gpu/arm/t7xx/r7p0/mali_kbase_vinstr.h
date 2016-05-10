@@ -28,6 +28,14 @@ struct kbase_vinstr_client;
 
 /*****************************************************************************/
 
+/* MALI_SEC_INTEGRATION - moved from mali_kbase_vinstr.c */
+enum {
+	SHADER_HWCNT_BM,
+	TILER_HWCNT_BM,
+	MMU_L2_HWCNT_BM,
+	JM_HWCNT_BM
+};
+
 /**
  * kbase_vinstr_init() - initialize the vinstr core
  * @kbdev: kbase device
@@ -100,5 +108,14 @@ void kbase_vinstr_hwc_suspend(struct kbase_vinstr_context *vinstr_ctx);
  */
 void kbase_vinstr_hwc_resume(struct kbase_vinstr_context *vinstr_ctx);
 
+#ifdef MALI_SEC_HWCNT
+struct kbase_vinstr_client *kbasep_vinstr_attach_client_sec(
+		struct kbase_vinstr_context *vinstr_ctx, u32 buffer_count,
+		u32 bitmap[4], void *argp);
+void kbasep_vinstr_detach_client_sec(struct kbase_vinstr_client *cli);
+int kbase_vinstr_enable(struct kbase_vinstr_context *ctx);
+void kbase_vinstr_disable(struct kbase_vinstr_context *ctx);
+void *kbase_vinstr_get_addr(struct kbase_device *kbdev);
+#endif
 #endif /* _KBASE_VINSTR_H_ */
 

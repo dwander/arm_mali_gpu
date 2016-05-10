@@ -27,6 +27,9 @@
 #include <mali_kbase_instr.h>
 
 #include <mali_kbase_pm.h>
+#ifdef MALI_SEC_UTILIZATION
+#include <backend/gpu/mali_kbase_pm_internal.h>
+#endif
 
 int kbase_pm_powerup(struct kbase_device *kbdev, unsigned int flags)
 {
@@ -48,6 +51,10 @@ int kbase_pm_context_active_handle_suspend(struct kbase_device *kbdev, enum kbas
 	struct kbasep_js_device_data *js_devdata = &kbdev->js_data;
 	int c;
 	int old_count;
+#ifdef MALI_SEC_UTILIZATION
+	unsigned long flags;
+	ktime_t now;
+#endif
 
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
 
@@ -89,11 +96,20 @@ int kbase_pm_context_active_handle_suspend(struct kbase_device *kbdev, enum kbas
 	if (old_count == 0)
 		kbase_timeline_pm_handle_event(kbdev, KBASE_TIMELINE_PM_EVENT_GPU_ACTIVE);
 
-	if (c == 1)
+	if (c == 1) {
 		/* First context active: Power on the GPU and any cores requested by
 		 * the policy */
 		kbase_hwaccess_pm_gpu_active(kbdev);
-
+#ifdef MALI_SEC_UTILIZATION
+		now = ktime_get();
+		spin_lock_irqsave(&kbdev->js_data.runpool_irq.lock, flags);
+		kbase_pm_metrics_update(kbdev, &now);
+		spin_unlock_irqrestore(&kbdev->js_data.runpool_irq.lock, flags);
+		spin_lock_irqsave(&kbdev->pm.backend.metrics.lock, flags);
+		kbdev->pm.backend.metrics.gpu_active = true;
+		spin_unlock_irqrestore(&kbdev->pm.backend.metrics.lock, flags);
+#endif
+	}
 	mutex_unlock(&kbdev->pm.lock);
 	mutex_unlock(&js_devdata->runpool_mutex);
 
@@ -107,6 +123,10 @@ void kbase_pm_context_idle(struct kbase_device *kbdev)
 	struct kbasep_js_device_data *js_devdata = &kbdev->js_data;
 	int c;
 	int old_count;
+#ifdef MALI_SEC_UTILIZATION
+	unsigned long flags;
+	ktime_t now;
+#endif
 
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
 
@@ -134,7 +154,15 @@ void kbase_pm_context_idle(struct kbase_device *kbdev)
 	if (c == 0) {
 		/* Last context has gone idle */
 		kbase_hwaccess_pm_gpu_idle(kbdev);
-
+#ifdef MALI_SEC_UTILIZATION
+		now = ktime_get();
+		spin_lock_irqsave(&kbdev->js_data.runpool_irq.lock, flags);
+		kbase_pm_metrics_update(kbdev, &now);
+		spin_unlock_irqrestore(&kbdev->js_data.runpool_irq.lock, flags);
+		spin_lock_irqsave(&kbdev->pm.backend.metrics.lock, flags);
+		kbdev->pm.backend.metrics.gpu_active = false;
+		spin_unlock_irqrestore(&kbdev->pm.backend.metrics.lock, flags);
+#endif
 		/* Wake up anyone waiting for this to become 0 (e.g. suspend). The
 		 * waiters must synchronize with us by locking the pm.lock after
 		 * waiting */
@@ -165,7 +193,14 @@ void kbase_pm_suspend(struct kbase_device *kbdev)
 	kbasep_js_suspend(kbdev);
 
 	/* Suspend any counter collection that might be happening */
+#ifdef MALI_SEC_HWCNT
+	mutex_lock(&kbdev->hwcnt.mlock);
+	if (kbdev->vendor_callbacks->hwcnt_disable)
+		kbdev->vendor_callbacks->hwcnt_disable(kbdev);
+	mutex_unlock(&kbdev->hwcnt.mlock);
+#else
 	kbase_instr_hwcnt_suspend(kbdev);
+#endif
 
 	/* Wait for the active count to reach zero. This is not the same as
 	 * waiting for a power down, since not all policies power down when this
@@ -187,7 +222,14 @@ void kbase_pm_resume(struct kbase_device *kbdev)
 	kbase_pm_context_active(kbdev);
 
 	/* Re-enable instrumentation, if it was previously disabled */
+#ifdef MALI_SEC_HWCNT
+	mutex_lock(&kbdev->hwcnt.mlock);
+	if (kbdev->vendor_callbacks->hwcnt_enable)
+		kbdev->vendor_callbacks->hwcnt_enable(kbdev);
+	mutex_unlock(&kbdev->hwcnt.mlock);
+#else
 	kbase_instr_hwcnt_resume(kbdev);
+#endif
 
 	/* Resume any blocked atoms (which may cause contexts to be scheduled in
 	 * and dependent atoms to run) */

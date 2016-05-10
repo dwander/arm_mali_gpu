@@ -183,6 +183,10 @@ static void kbase_pm_invoke(struct kbase_device *kbdev,
 			}
 	}
 
+	/* MALI_SEC_INTEGRATION */
+	if (action == ACTION_PWROFF)
+		return;
+
 	if (lo != 0)
 		kbase_reg_write(kbdev, GPU_CONTROL_REG(reg), lo, NULL);
 
@@ -922,12 +926,13 @@ void kbase_pm_clock_on(struct kbase_device *kbdev, bool is_resume)
 	if (is_resume && kbdev->pm.backend.callback_power_resume) {
 		kbdev->pm.backend.callback_power_resume(kbdev);
 	} else if (kbdev->pm.backend.callback_power_on) {
-		kbdev->pm.backend.callback_power_on(kbdev);
+		/* MALI_SEC_INTEGRATION */
 		/* If your platform properly keeps the GPU state you may use the
 		 * return value of the callback_power_on function to
-		 * conditionally reset the GPU on power up. Currently we are
-		 * conservative and always reset the GPU. */
-		reset_required = true;
+		 * conditionally reset the GPU on power up.
+		 * SAMSUNG doesn't reset the GPU always. Always reset can hurt the performance */
+		if (kbdev->pm.backend.callback_power_on(kbdev))
+			reset_required = true;
 	}
 
 	spin_lock_irqsave(&kbdev->pm.backend.gpu_powered_lock, flags);
@@ -937,7 +942,21 @@ void kbase_pm_clock_on(struct kbase_device *kbdev, bool is_resume)
 	if (reset_required) {
 		/* GPU state was lost, reset GPU to ensure it is in a
 		 * consistent state */
+		/* MALI_SEC_INTEGRATION */
+		if(kbdev->vendor_callbacks->init_hw)
+			kbdev->vendor_callbacks->init_hw(kbdev);
+
+		/* MALI_SEC_INTEGRATION */
+		/* while the GPU initialization, vendor desired gpu log will be out by set_power_dbg(false) calls */
+		if(kbdev->vendor_callbacks->set_poweron_dbg)
+			kbdev->vendor_callbacks->set_poweron_dbg(false);
+
 		kbase_pm_init_hw(kbdev, PM_ENABLE_IRQS);
+
+		/* MALI_SEC_INTEGRATION */
+		if (kbdev->pm.backend.callback_power_dvfs_on)
+			kbdev->pm.backend.callback_power_dvfs_on(kbdev);
+
 	}
 
 	/* Reprogram the GPU's MMU */
@@ -959,6 +978,14 @@ void kbase_pm_clock_on(struct kbase_device *kbdev, bool is_resume)
 
 	/* Lastly, enable the interrupts */
 	kbase_pm_enable_interrupts(kbdev);
+
+/* MALI_SEC_INTEGRATION */
+#ifdef MALI_SEC_HWCNT
+	mutex_lock(&kbdev->hwcnt.mlock);
+	if (kbdev->vendor_callbacks->hwcnt_enable)
+		kbdev->vendor_callbacks->hwcnt_enable(kbdev);
+	mutex_unlock(&kbdev->hwcnt.mlock);
+#endif
 }
 
 KBASE_EXPORT_TEST_API(kbase_pm_clock_on);
@@ -966,6 +993,8 @@ KBASE_EXPORT_TEST_API(kbase_pm_clock_on);
 bool kbase_pm_clock_off(struct kbase_device *kbdev, bool is_suspend)
 {
 	unsigned long flags;
+	/* MALI_SEC_SECURE_RENDERING */
+	int err = -EINVAL;
 
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
 	lockdep_assert_held(&kbdev->pm.lock);
@@ -983,6 +1012,35 @@ bool kbase_pm_clock_off(struct kbase_device *kbdev, bool is_suspend)
 	}
 
 	KBASE_TRACE_ADD(kbdev, PM_GPU_OFF, NULL, NULL, 0u, 0u);
+
+	/* MALI_SEC_SECURE_RENDERING */
+	if( kbdev->secure_mode == true) {
+
+		WARN_ONCE(!kbdev->secure_ops,
+				"Cannot disable secure mode: secure callbacks not specified.\n");
+
+		if (kbdev->secure_ops) {
+			/* Switch GPU to non-secure mode */
+			err = kbdev->secure_ops->secure_mode_disable(kbdev);
+
+			if (err)
+				dev_warn(kbdev->dev, "Failed to disable secure mode: %d\n", err);
+			else
+				kbdev->secure_mode = false;
+		}
+	}
+
+/* MALI_SEC_INTEGRATION */
+#ifdef MALI_SEC_HWCNT
+	mutex_lock(&kbdev->hwcnt.mlock);
+	if (kbdev->vendor_callbacks->hwcnt_update) {
+		kbdev->vendor_callbacks->hwcnt_update(kbdev);
+		dvfs_hwcnt_get_resource(kbdev);
+	}
+	if (kbdev->vendor_callbacks->hwcnt_disable)
+		kbdev->vendor_callbacks->hwcnt_disable(kbdev);
+	mutex_unlock(&kbdev->hwcnt.mlock);
+#endif
 
 	/* Disable interrupts. This also clears any outstanding interrupts */
 	kbase_pm_disable_interrupts(kbdev);
@@ -1166,7 +1224,6 @@ static void kbase_pm_hw_issues_apply(struct kbase_device *kbdev)
 
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(L2_MMU_CONFIG),
 			kbdev->hw_quirks_mmu, NULL);
-
 
 	if (kbdev->hw_quirks_jm != KBASE_JM_CONFIG_UNUSED)
 		kbase_reg_write(kbdev, GPU_CONTROL_REG(JM_CONFIG),

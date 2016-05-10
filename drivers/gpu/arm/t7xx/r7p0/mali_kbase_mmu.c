@@ -56,7 +56,6 @@
 static void kbase_mmu_sync_pgd(struct device *dev,
 		dma_addr_t handle, size_t size)
 {
-
 	dma_sync_single_for_device(dev, handle, size, DMA_TO_DEVICE);
 }
 
@@ -1395,6 +1394,10 @@ static void kbase_mmu_report_fault_and_kill(struct kbase_context *kctx,
 		access_type, access_type_name(kbdev, as->fault_status),
 		source_id,
 		kctx->pid);
+
+	/* MALI_SEC_INTEGRATION */
+	if( kbdev->vendor_callbacks->debug_pagetable_info)
+		kbdev->vendor_callbacks->debug_pagetable_info(kctx, as->fault_addr);
 
 	/* hardware counters dump fault handling */
 	if ((kbdev->hwcnt.kctx) && (kbdev->hwcnt.kctx->as_nr == as_no) &&

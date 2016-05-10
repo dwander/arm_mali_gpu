@@ -72,6 +72,8 @@ int kbase_hwaccess_pm_init(struct kbase_device *kbdev)
 
 	kbdev->pm.backend.gpu_powered = false;
 	kbdev->pm.suspending = false;
+	/* MALI_SEC_INTEGRATION */
+	init_waitqueue_head(&kbdev->pm.suspending_wait);
 #ifdef CONFIG_MALI_DEBUG
 	kbdev->pm.backend.driver_ready_for_irqs = false;
 #endif /* CONFIG_MALI_DEBUG */
@@ -96,6 +98,11 @@ int kbase_hwaccess_pm_init(struct kbase_device *kbdev)
 					callbacks->power_runtime_on_callback;
 		kbdev->pm.backend.callback_power_runtime_off =
 					callbacks->power_runtime_off_callback;
+/* MALI_SEC_INTEGRATION */
+		kbdev->pm.backend.callback_power_dvfs_on =
+					callbacks->power_dvfs_on_callback;
+		kbdev->pm.backend.callback_power_change_dvfs_level =
+					callbacks->power_change_dvfs_level_callback;
 	} else {
 		kbdev->pm.backend.callback_power_on = NULL;
 		kbdev->pm.backend.callback_power_off = NULL;
@@ -105,6 +112,9 @@ int kbase_hwaccess_pm_init(struct kbase_device *kbdev)
 		kbdev->pm.callback_power_runtime_term = NULL;
 		kbdev->pm.backend.callback_power_runtime_on = NULL;
 		kbdev->pm.backend.callback_power_runtime_off = NULL;
+/* MALI_SEC_INTEGRATION */
+		kbdev->pm.backend.callback_power_dvfs_on = NULL;
+		kbdev->pm.backend.callback_power_change_dvfs_level = NULL;
 	}
 
 	/* Initialise the metrics subsystem */
@@ -213,6 +223,11 @@ int kbase_hwaccess_pm_powerup(struct kbase_device *kbdev,
 	mutex_lock(&js_devdata->runpool_mutex);
 	mutex_lock(&kbdev->pm.lock);
 
+	/* MALI_SEC_INTEGRATION */
+	/* while the GPU initialization, vendor desired gpu log will be out by set_power_dbg(FALSE) calls */
+	if(kbdev->vendor_callbacks->set_poweron_dbg)
+		kbdev->vendor_callbacks->set_poweron_dbg(false);
+
 	/* A suspend won't happen during startup/insmod */
 	KBASE_DEBUG_ASSERT(!kbase_pm_is_suspending(kbdev));
 
@@ -255,6 +270,12 @@ int kbase_hwaccess_pm_powerup(struct kbase_device *kbdev,
 	kbase_pm_do_poweron(kbdev, false);
 	mutex_unlock(&kbdev->pm.lock);
 	mutex_unlock(&js_devdata->runpool_mutex);
+
+#ifdef MALI_SEC_HWCNT
+	if (kbdev->hwcnt.is_hwcnt_attach == false)
+		if (kbdev->vendor_callbacks->hwcnt_attach)
+			kbdev->vendor_callbacks->hwcnt_attach(kbdev);
+#endif
 
 	/* Idle the GPU and/or cores, if the policy wants it to */
 	kbase_pm_context_idle(kbdev);
@@ -370,6 +391,8 @@ void kbase_hwaccess_pm_resume(struct kbase_device *kbdev)
 	mutex_lock(&kbdev->pm.lock);
 	kbdev->pm.suspending = false;
 	kbase_pm_do_poweron(kbdev, true);
+	/* MALI_SEC_INTEGRATION */
+	wake_up(&kbdev->pm.suspending_wait);
 	mutex_unlock(&kbdev->pm.lock);
 	mutex_unlock(&js_devdata->runpool_mutex);
 }

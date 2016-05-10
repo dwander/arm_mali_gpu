@@ -73,13 +73,14 @@ int kbase_backend_late_init(struct kbase_device *kbdev)
 {
 	int err;
 
-	err = kbase_hwaccess_pm_powerup(kbdev, PM_HW_ISSUES_DETECT);
-	if (err)
-		return err;
-
 	err = kbase_backend_timer_init(kbdev);
 	if (err)
 		goto fail_timer;
+
+	/* MALI_SEC_INTEGRATION - timer_init, powerup switching location for sec_hwcnt */
+	err = kbase_hwaccess_pm_powerup(kbdev, PM_HW_ISSUES_DETECT);
+	if (err)
+		return err;
 
 /* Currently disabled on the prototype */
 #ifdef CONFIG_MALI_DEBUG

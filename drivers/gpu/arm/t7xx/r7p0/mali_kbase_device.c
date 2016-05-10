@@ -51,7 +51,9 @@ static const char *kbasep_trace_code_string[] = {
 };
 #endif
 
-#define DEBUG_MESSAGE_SIZE 256
+/* MALI_SEC_INTEGRATION */
+//#define DEBUG_MESSAGE_SIZE 256
+#define DEBUG_MESSAGE_SIZE KBASE_TRACE_SIZE
 
 static int kbasep_trace_init(struct kbase_device *kbdev);
 static void kbasep_trace_term(struct kbase_device *kbdev);
@@ -338,6 +340,8 @@ void kbase_device_trace_register_access(struct kbase_context *kctx, enum kbase_r
 
 static int kbasep_trace_init(struct kbase_device *kbdev)
 {
+/* MALI_SEC_INTEGRATION */
+#ifndef CONFIG_MALI_EXYNOS_TRACE
 	struct kbase_trace *rbuf;
 
 	rbuf = kmalloc_array(KBASE_TRACE_SIZE, sizeof(*rbuf), GFP_KERNEL);
@@ -347,15 +351,21 @@ static int kbasep_trace_init(struct kbase_device *kbdev)
 
 	kbdev->trace_rbuf = rbuf;
 	spin_lock_init(&kbdev->trace_lock);
+#endif
 	return 0;
 }
 
 static void kbasep_trace_term(struct kbase_device *kbdev)
 {
+/* MALI_SEC_INTEGRATION */
+#ifndef CONFIG_MALI_EXYNOS_TRACE
 	kfree(kbdev->trace_rbuf);
+#endif
 }
 
-static void kbasep_trace_format_msg(struct kbase_trace *trace_msg, char *buffer, int len)
+/* MALI_SEC_INTEGRATION */
+//static
+void kbasep_trace_format_msg(struct kbase_trace *trace_msg, char *buffer, int len)
 {
 	s32 written = 0;
 
@@ -392,10 +402,62 @@ static void kbasep_trace_dump_msg(struct kbase_device *kbdev, struct kbase_trace
 	dev_dbg(kbdev->dev, "%s", buffer);
 }
 
+/* MALI_SEC_INTEGRATION */
+#ifdef CONFIG_MALI_EXYNOS_TRACE
+bool check_trace_code(enum kbase_trace_code code)
+{
+	unsigned int temp = code;
+
+	switch(temp) {
+		case KBASE_TRACE_CODE(CORE_CTX_DESTROY):
+		case KBASE_TRACE_CODE(CORE_GPU_SOFT_RESET):
+		case KBASE_TRACE_CODE(CORE_GPU_HARD_RESET):
+		case KBASE_TRACE_CODE(JM_SOFTSTOP):
+		case KBASE_TRACE_CODE(JM_HARDSTOP):
+		case KBASE_TRACE_CODE(LSI_GPU_ON):
+		case KBASE_TRACE_CODE(LSI_GPU_OFF):
+		case KBASE_TRACE_CODE(LSI_SUSPEND):
+		case KBASE_TRACE_CODE(LSI_RESUME):
+		case KBASE_TRACE_CODE(LSI_CLOCK_VALUE):
+		case KBASE_TRACE_CODE(LSI_TMU_VALUE):
+		case KBASE_TRACE_CODE(LSI_VOL_VALUE):
+		case KBASE_TRACE_CODE(LSI_REGISTER_DUMP):
+		case KBASE_TRACE_CODE(LSI_CLOCK_ON):
+		case KBASE_TRACE_CODE(LSI_CLOCK_OFF):
+		case KBASE_TRACE_CODE(LSI_HWCNT_ON_DVFS):
+		case KBASE_TRACE_CODE(LSI_HWCNT_OFF_DVFS):
+		case KBASE_TRACE_CODE(LSI_HWCNT_ON_GPR):
+		case KBASE_TRACE_CODE(LSI_HWCNT_OFF_GPR):
+		case KBASE_TRACE_CODE(LSI_HWCNT_BT_ON):
+		case KBASE_TRACE_CODE(LSI_HWCNT_BT_OFF):
+		case KBASE_TRACE_CODE(LSI_HWCNT_VSYNC_SKIP):
+		case KBASE_TRACE_CODE(LSI_CHECKSUM):
+		case KBASE_TRACE_CODE(LSI_GPU_MAX_LOCK):
+		case KBASE_TRACE_CODE(LSI_GPU_MIN_LOCK):
+			return true;
+		default:
+			return false;
+	}
+	return true;
+}
+#endif
+
 void kbasep_trace_add(struct kbase_device *kbdev, enum kbase_trace_code code, void *ctx, struct kbase_jd_atom *katom, u64 gpu_addr, u8 flags, int refcount, int jobslot, unsigned long info_val)
 {
 	unsigned long irqflags;
 	struct kbase_trace *trace_msg;
+
+/* MALI_SEC_INTEGRATION */
+#ifdef CONFIG_MALI_EXYNOS_TRACE
+	u64 time;
+	unsigned long rem_nsec;
+
+	if (!check_trace_code(code))
+		return;
+
+	if (code == KBASE_TRACE_CODE(JM_SOFTSTOP) || code == KBASE_TRACE_CODE(JM_HARDSTOP))
+		gpu_dump_register_hooks(kbdev);
+#endif
 
 	spin_lock_irqsave(&kbdev->trace_lock, irqflags);
 
@@ -405,7 +467,15 @@ void kbasep_trace_add(struct kbase_device *kbdev, enum kbase_trace_code code, vo
 	trace_msg->thread_id = task_pid_nr(current);
 	trace_msg->cpu = task_cpu(current);
 
+/* MALI_SEC_INTEGRATION */
+#ifdef CONFIG_MALI_EXYNOS_TRACE
+	time = local_clock();
+	rem_nsec = do_div(time, 1000000000);
+	trace_msg->timestamp.tv_sec = time;
+	trace_msg->timestamp.tv_nsec = rem_nsec;
+#else
 	getnstimeofday(&trace_msg->timestamp);
+#endif
 
 	trace_msg->code = code;
 	trace_msg->ctx = ctx;
@@ -555,7 +625,9 @@ static int kbasep_trace_debugfs_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static const struct file_operations kbasep_trace_debugfs_fops = {
+/* MALI_SEC_INTEGRATION */
+//static
+const struct file_operations kbasep_trace_debugfs_fops = {
 	.open = kbasep_trace_debugfs_open,
 	.read = seq_read,
 	.llseek = seq_lseek,
@@ -564,9 +636,12 @@ static const struct file_operations kbasep_trace_debugfs_fops = {
 
 void kbasep_trace_debugfs_init(struct kbase_device *kbdev)
 {
+/* MALI_SEC_INTEGRATION */
+#ifndef CONFIG_MALI_EXYNOS_TRACE
 	debugfs_create_file("mali_trace", S_IRUGO,
 			kbdev->mali_debugfs_directory, kbdev,
 			&kbasep_trace_debugfs_fops);
+#endif
 }
 
 #else

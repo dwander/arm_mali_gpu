@@ -2762,6 +2762,12 @@ void kbase_js_complete_atom(struct kbase_jd_atom *katom, ktime_t *end_timestamp)
 	union kbasep_js_policy *js_policy;
 	struct kbasep_js_device_data *js_devdata;
 
+#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
+/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
+    int i=0;
+#endif
+/* SRUK-MALI_SYSTRACE_SUPPORT }*/
+
 	kbdev = kctx->kbdev;
 
 	js_policy = &kbdev->js_data.policy;
@@ -2775,6 +2781,30 @@ void kbase_js_complete_atom(struct kbase_jd_atom *katom, ktime_t *end_timestamp)
 	kbase_trace_mali_job_slots_event(GATOR_MAKE_EVENT(GATOR_JOB_SLOT_STOP,
 				katom->slot_nr), NULL, 0);
 #endif
+#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
+/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
+    kbase_systrace_mali_job_slots_event(SYSTRACE_EVENT_TYPE_STOP, katom->slot_nr, katom->kctx, kbase_jd_atom_id(katom->kctx, katom),
+                                        ktime_to_ns(katom->start_timestamp),
+                                        katom->kbase_atom_dep_systrace[0].dep_atom_id,
+                                        katom->kbase_atom_dep_systrace[0].dep_atom_dependency_type,
+                                        katom->kbase_atom_dep_systrace[1].dep_atom_id,
+                                        katom->kbase_atom_dep_systrace[1].dep_atom_dependency_type,
+                                        katom->gles_ctx_handle);
+
+    // clear dependency information for systrace
+    for(i=0; i<2; i++)
+    {
+        katom->gles_ctx_handle = 0;
+
+        if(katom->kbase_atom_dep_systrace[i].dep_atom_id ==0  && katom->kbase_atom_dep_systrace[0].dep_atom_dependency_type == BASE_JD_DEP_TYPE_INVALID ){
+            continue;
+        }
+
+        katom->kbase_atom_dep_systrace[i].dep_atom_id =0;
+        katom->kbase_atom_dep_systrace[i].dep_atom_dependency_type = BASE_JD_DEP_TYPE_INVALID;
+    }
+#endif
+/* SRUK-MALI_SYSTRACE_SUPPORT }*/
 #if defined(CONFIG_MALI_MIPE_ENABLED)
 	kbase_tlstream_tl_nret_atom_lpu(
 			katom,
@@ -2791,6 +2821,10 @@ void kbase_js_complete_atom(struct kbase_jd_atom *katom, ktime_t *end_timestamp)
 							katom->start_timestamp);
 
 		microseconds_spent = ktime_to_ns(tick_diff);
+
+		/* MALI_SEC_INTEGRATION */
+		if(kbdev->vendor_callbacks->cl_boost_update_utilization)
+			kbdev->vendor_callbacks->cl_boost_update_utilization(kbdev, katom, microseconds_spent);
 
 		do_div(microseconds_spent, 1000);
 

@@ -506,6 +506,10 @@ static struct kbase_va_region *kbase_mem_from_umm(struct kbase_context *kctx, in
 	if (IS_ERR_OR_NULL(reg->gpu_alloc))
 		goto no_alloc_obj;
 
+	/* MALI_SEC_SECURE_RENDERING */
+	reg->phys_by_ion = 0;
+	reg->len_by_ion = 0;
+
 	reg->cpu_alloc = kbase_mem_phy_alloc_get(reg->gpu_alloc);
 
 	/* No pages to map yet */
@@ -528,8 +532,18 @@ static struct kbase_va_region *kbase_mem_from_umm(struct kbase_context *kctx, in
 	if (*flags & BASE_MEM_PROT_GPU_RD)
 		reg->flags |= KBASE_REG_GPU_RD;
 
-	if (*flags & BASE_MEM_SECURE)
-		reg->flags |= KBASE_REG_SECURE;
+	if (*flags & BASE_MEM_SECURE) {
+		/* MALI_SEC_SECURE_RENDERING */
+		if (kctx->kbdev->secure_mode_support == true &&
+			kctx->kbdev->secure_ops != NULL) {
+			int err = -EINVAL;
+			err = kctx->kbdev->secure_ops->secure_mem_enable(kctx->kbdev, fd, *flags, reg);
+			if (err)
+				dev_warn(kctx->kbdev->dev, "Failed to enable secure memory : 0x%08x\n", err);
+		} else {
+			dev_warn(kctx->kbdev->dev, "%s: wrong operation! DDK cannot support Secure Rendering\n", __func__);
+		}
+	}
 
 	/* no read or write permission given on import, only on run do we give the right permissions */
 
@@ -851,6 +865,11 @@ static int zap_range_nolock(struct mm_struct *mm,
 
 		if (end < local_end)
 			local_end = end;
+
+/* MALI_SEC_INTEGRATION */
+		if (start < vma->vm_start) {
+			start = vma->vm_start;
+		}
 
 		err = zap_vma_ptes(vma, start, local_end - start);
 		if (unlikely(err))
