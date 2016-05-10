@@ -108,19 +108,13 @@ struct kbasep_pm_metrics_data {
 	u32 active_gl_ctx[2]; /* GL jobs can only run on 2 of the 3 job slots */
 	spinlock_t lock;
 
-/* MALI_SEC_INTEGRATION */
-/* #ifdef CONFIG_MALI_MIDGARD_DVFS */
+#ifdef CONFIG_MALI_MIDGARD_DVFS
 	struct hrtimer timer;
 	bool timer_active;
-/* MALI_SEC_INTEGRATION */
-	struct delayed_work work;
-/* #endif */
+#endif
 
 	void *platform_data;
 	struct kbase_device *kbdev;
-#ifdef MALI_SEC_CL_BOOST
-	atomic_t time_compute_jobs, time_vertex_jobs, time_fragment_jobs;
-#endif
 };
 
 union kbase_pm_policy_data {
@@ -285,9 +279,6 @@ struct kbase_pm_backend_data {
 	void (*callback_power_resume)(struct kbase_device *kbdev);
 	int (*callback_power_runtime_on)(struct kbase_device *kbdev);
 	void (*callback_power_runtime_off)(struct kbase_device *kbdev);
-	/* MALI_SEC_INTEGRATION */
-	int (*callback_power_dvfs_on)(struct kbase_device *kbdev);
-	int (*callback_power_change_dvfs_level)(struct kbase_device *kbdev);
 
 };
 

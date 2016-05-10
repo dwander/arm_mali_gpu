@@ -23,9 +23,6 @@
 #include "mali_uk.h"
 #include "mali_base_kernel.h"
 
-/* MALI_SEC_INTEGRATION */
-#include "mali_kbase_platform_uku.h"
-
 /* This file needs to support being included from kernel and userside (which use different defines) */
 #if defined(CONFIG_MALI_ERROR_INJECT) || MALI_ERROR_INJECT_ON
 #define SUPPORT_MALI_ERROR_INJECT
@@ -108,15 +105,6 @@ struct kbase_uk_job_submit {
 	union kbase_pointer addr;
 	u32 nr_atoms;
 	u32 stride;		/* bytes between atoms, i.e. sizeof(base_jd_atom_v2) */
-
-/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
-//#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
-
-    u32 gles_ctx_handle; /* user DDK gles context handle (unique) to kernel DDK side */
-
-//#endif /* CONFIG_MALI_SYSTRACE_SUPPORT*/
-/* SRUK-MALI_SYSTRACE_SUPPORT }*/
-
 	/* OUT */
 };
 
@@ -466,22 +454,7 @@ enum kbase_uk_function_id {
 #endif /* MALI_KTLSTREAM_ENABLED */
 
 	KBASE_FUNC_HWCNT_READER_SETUP = (UK_FUNC_ID + 36),
-/* MALI_SEC_INTEGRATION */
-#ifdef MALI_SEC_HWCNT
-	KBASE_FUNC_HWCNT_UTIL_SETUP,
-	KBASE_FUNC_HWCNT_GPR_DUMP,
-	KBASE_FUNC_VSYNC_SKIP,
-#endif
-	/* MALI_SEC_INTEGRATION */
-	KBASE_FUNC_CREATE_SURFACE,
-	KBASE_FUNC_DESTROY_SURFACE,
-	KBASE_FUNC_SET_MIN_LOCK,
-	KBASE_FUNC_UNSET_MIN_LOCK,
-	KBASE_FUNC_TMU_SKIP,
-	/* MALI_SEC_SECURE_RENDERING */
-	KBASE_FUNC_SECURE_WORLD_RENDERING = (UK_FUNC_ID + 55),
-	KBASE_FUNC_NON_SECURE_WORLD_RENDERING,
-/* MALI_SEC_INTEGRATION end */
+
 	KBASE_FUNC_MAX
 };
 

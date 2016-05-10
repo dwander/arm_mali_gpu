@@ -15,7 +15,7 @@
 
 
 # Driver version string which is returned to userspace via an ioctl
-MALI_RELEASE_NAME ?= "r7p0-03rel0"
+MALI_RELEASE_NAME ?= "r7p0-02rel0"
 
 # Paths required for build
 KBASE_PATH = $(src)
@@ -34,15 +34,6 @@ MALI_ERROR_INJECT_ON ?= 0
 MALI_MOCK_TEST ?= 0
 MALI_COVERAGE ?= 0
 MALI_INSTRUMENTATION_LEVEL ?= 0
-# MALI_SEC_SECURE_RENDERING
-MALI_SUPPORT_ASP_SECURE ?= 0
-
-# MALI_SEC_INTEGRATION
-# To resolve the choice error in Kconfig, define the config here.
-# Choose the one of the below configs.
-# MALI_TIMELINE_DISABLED, MALI_GATOR_SUPPORT_TIMELINE, MALI_MIPE_ENABLED
-MALI_TIMELINE_DISABLED ?= 1
-
 # This workaround is for what seems to be a compiler bug we observed in
 # GCC 4.7 on AOSP 4.3.  The bug caused an intermittent failure compiling
 # the "_Pragma" syntax, where an error message is returned:
@@ -65,17 +56,7 @@ DEFINES = \
 	-DMALI_COVERAGE=$(MALI_COVERAGE) \
 	-DMALI_INSTRUMENTATION_LEVEL=$(MALI_INSTRUMENTATION_LEVEL) \
 	-DMALI_RELEASE_NAME=\"$(MALI_RELEASE_NAME)\" \
-	-DMALI_GCC_WORKAROUND_MIDCOM_4598=$(MALI_GCC_WORKAROUND_MIDCOM_4598) \
-	-DMALI_SEC_CL_BOOST \
-	-DMALI_SEC_FENCE_INTEGRATION \
-	-DMALI_SEC_UTILIZATION \
-	-DKBASE_FENCE_TIMEOUT_FAKE_SIGNAL \
-	-DMALI_SEC_ASP_SECURE_RENDERING=$(MALI_SUPPORT_ASP_SECURE) \
-	-DMALI_SEC_LEGACY_SUPPORT
-
-ifeq ($(CONFIG_MALI_GATOR_SUPPORT_TIMELINE),y)
-DEFINES +=-DCONFIG_MALI_GATOR_SUPPORT
-endif
+	-DMALI_GCC_WORKAROUND_MIDCOM_4598=$(MALI_GCC_WORKAROUND_MIDCOM_4598)
 
 ifeq ($(KBUILD_EXTMOD),)
 # in-tree
@@ -86,10 +67,6 @@ DEFINES +=-DMALI_KBASE_THIRDPARTY_PATH=$(src)/platform/$(CONFIG_MALI_PLATFORM_TH
 endif
 
 DEFINES += -I$(srctree)/drivers/staging/android
-
-ifeq ($(CONFIG_MALI_SEC_HWCNT),y)
-	DEFINES +=-DMALI_SEC_HWCNT
-endif
 
 # Use our defines when compiling
 ccflags-y += $(DEFINES) -I$(KBASE_PATH)   -I$(KBASE_PLATFORM_PATH) -I$(UMP_PATH) -I$(srctree)/include/linux
@@ -148,16 +125,69 @@ SRC += mali_kbase_js_policy_cfs.c
 
 ccflags-y += -I$(KBASE_PATH)
 
+ifeq ($(CONFIG_MALI_PLATFORM_FAKE),y)
+	SRC += mali_kbase_platform_fake.c
+
+	ifeq ($(CONFIG_MALI_PLATFORM_VEXPRESS),y)
+		SRC += platform/vexpress/mali_kbase_config_vexpress.c \
+		platform/vexpress/mali_kbase_cpu_vexpress.c
+		ccflags-y += -I$(src)/platform/vexpress
+	endif
+
+	ifeq ($(CONFIG_MALI_PLATFORM_RTSM_VE),y)
+		SRC += platform/rtsm_ve/mali_kbase_config_vexpress.c
+		ccflags-y += -I$(src)/platform/rtsm_ve
+	endif
+
+	ifeq ($(CONFIG_MALI_PLATFORM_JUNO),y)
+		SRC += platform/juno/mali_kbase_config_vexpress.c
+		ccflags-y += -I$(src)/platform/juno
+	endif
+
+	ifeq ($(CONFIG_MALI_PLATFORM_JUNO_SOC),y)
+		SRC += platform/juno_soc/mali_kbase_config_juno_soc.c
+		ccflags-y += -I$(src)/platform/juno_soc
+	endif
+
+	ifeq ($(CONFIG_MALI_PLATFORM_VEXPRESS_1XV7_A57),y)
+		SRC += platform/vexpress_1xv7_a57/mali_kbase_config_vexpress.c
+		ccflags-y += -I$(src)/platform/vexpress_1xv7_a57
+	endif
+
+	ifeq ($(CONFIG_MALI_PLATFORM_VEXPRESS_6XVIRTEX7_10MHZ),y)
+		SRC += platform/vexpress_6xvirtex7_10mhz/mali_kbase_config_vexpress.c \
+		platform/vexpress_6xvirtex7_10mhz/mali_kbase_cpu_vexpress.c
+		ccflags-y += -I$(src)/platform/vexpress_6xvirtex7_10mhz
+	endif
+
+	ifeq ($(CONFIG_MALI_PLATFORM_A7_KIPLING),y)
+		SRC += platform/a7_kipling/mali_kbase_config_a7_kipling.c \
+		platform/a7_kipling/mali_kbase_cpu_a7_kipling.c
+		ccflags-y += -I$(src)/platform/a7_kipling
+	endif
+
+	ifeq ($(CONFIG_MALI_PLATFORM_THIRDPARTY),y)
+	# remove begin and end quotes from the Kconfig string type
+	platform_name := $(shell echo $(CONFIG_MALI_PLATFORM_THIRDPARTY_NAME))
+	MALI_PLATFORM_THIRDPARTY_DIR := platform/$(platform_name)
+	ccflags-y += -I$(src)/$(MALI_PLATFORM_THIRDPARTY_DIR)
+	ifeq ($(CONFIG_MALI_MIDGARD),m)
+	include  $(src)/platform/$(platform_name)/Kbuild
+	else ifeq ($(CONFIG_MALI_MIDGARD),y)
+	obj-$(CONFIG_MALI_MIDGARD) += platform/
+	endif
+	endif
+endif # CONFIG_MALI_PLATFORM_FAKE=y
 
 ifeq ($(CONFIG_MALI_PLATFORM_THIRDPARTY),y)
 # remove begin and end quotes from the Kconfig string type
 platform_name := $(shell echo $(CONFIG_MALI_PLATFORM_THIRDPARTY_NAME))
-MALI_PLATFORM_THIRDPARTY_DIR := platform/exynos
+MALI_PLATFORM_THIRDPARTY_DIR := platform/$(platform_name)
 ccflags-y += -I$(src)/$(MALI_PLATFORM_THIRDPARTY_DIR)
-ifeq ($(CONFIG_MALI_R7P0),m)
+ifeq ($(CONFIG_MALI_MIDGARD),m)
 include  $(src)/platform/$(platform_name)/Kbuild
-else ifeq ($(CONFIG_MALI_R7P0),y)
-obj-$(CONFIG_MALI_R7P0) += platform/
+else ifeq ($(CONFIG_MALI_MIDGARD),y)
+obj-$(CONFIG_MALI_MIDGARD) += platform/
 endif
 endif
 
@@ -168,7 +198,7 @@ ifeq ($(CONFIG_MALI_PLATFORM_DEVICETREE),y)
 endif
 
 # Tell the Linux build system from which .o file to create the kernel module
-obj-$(CONFIG_MALI_R7P0) += mali_kbase.o
+obj-$(CONFIG_MALI_MIDGARD) += mali_kbase.o
 
 # Tell the Linux build system to enable building of our .c files
 mali_kbase-y := $(SRC:.c=.o)

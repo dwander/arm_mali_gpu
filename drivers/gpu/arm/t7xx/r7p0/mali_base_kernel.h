@@ -456,10 +456,6 @@ typedef u16 base_jd_core_req;
  */
 #define BASE_JD_REQ_SOFT_REPLAY                 (BASE_JD_REQ_SOFT_JOB | 0x4)
 
-//#ifdef CONFIG_MALI_DVFS_USER
-#define BASE_JD_REQ_SOFT_DVFS                   (BASE_JD_REQ_SOFT_JOB | 0x5)
-//#endif
-
 /**
  * HW Requirement: Requires Compute shaders (but not Vertex or Geometry Shaders)
  *
@@ -634,11 +630,6 @@ typedef struct base_jd_atom_v2 {
 	base_jd_prio prio;                  /**< Atom priority. Refer to @ref base_jd_prio for more details */
 	u8 device_nr;			    /**< coregroup when BASE_JD_REQ_SPECIFIC_COHERENT_GROUP specified */
 	u8 padding[5];
-/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
-#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
-    u32 gles_ctx_handle;  /** gles context unique handle : reduced to 32bit */
-#endif /* CONFIG_MALI_SYSTRACE_SUPPORT*/
-/* SRUK-MALI_SYSTRACE_SUPPORT }*/
 } base_jd_atom_v2;
 
 #ifdef BASE_LEGACY_UK6_SUPPORT
@@ -911,14 +902,6 @@ typedef enum base_jd_event_code {
 	BASE_JD_EVENT_PROGRESS_REPORT = BASE_JD_SW_EVENT | BASE_JD_SW_EVENT_SUCCESS | BASE_JD_SW_EVENT_JOB | 0x000,
 	BASE_JD_EVENT_BAG_DONE = BASE_JD_SW_EVENT | BASE_JD_SW_EVENT_SUCCESS | BASE_JD_SW_EVENT_BAG | 0x000,
 	BASE_JD_EVENT_DRV_TERMINATED = BASE_JD_SW_EVENT | BASE_JD_SW_EVENT_SUCCESS | BASE_JD_SW_EVENT_INFO | 0x000,
-
-	//#ifdef CONFIG_MALI_DVFS_USER
-	BASE_JD_EVENT_DVFS_EVENT = BASE_JD_SW_EVENT | BASE_JD_SW_EVENT_SUCCESS | BASE_JD_SW_EVENT_JOB | 0x001,
-	BASE_JD_EVENT_DVFS_INFO_POWER_OFF = BASE_JD_SW_EVENT | BASE_JD_SW_EVENT_INFO | 0x001,
-	BASE_JD_EVENT_DVFS_INFO_POWER_ON = BASE_JD_SW_EVENT | BASE_JD_SW_EVENT_INFO | 0x002,
-	BASE_JD_EVENT_DVFS_INFO_PROFILE_MODE_ON = BASE_JD_SW_EVENT | BASE_JD_SW_EVENT_INFO | 0x003,
-	BASE_JD_EVENT_DVFS_INFO_PROFILE_MODE_OFF = BASE_JD_SW_EVENT | BASE_JD_SW_EVENT_INFO | 0x004,
-	//#endif
 
 	/** End of SW Success status codes */
 	BASE_JD_EVENT_RANGE_SW_SUCCESS_END = BASE_JD_SW_EVENT | BASE_JD_SW_EVENT_SUCCESS | BASE_JD_SW_EVENT_RESERVED | 0x3FF,
@@ -1602,69 +1585,6 @@ typedef struct base_jd_replay_jc {
 	u64 jc;
 
 } base_jd_replay_jc;
-
-//#ifdef CONFIG_MALI_DVFS_USER
-#define DVFS_USER_NOTIFIER_ATOM_NUMBER_BASE 100
-#define DVFS_USER_NOTIFIER_ATOM_NUMBER_MAX BASE_JD_ATOM_COUNT
-#define DVFS_USER_ATOM_NUMBER_BASE 0
-#define DVFS_USER_ATOM_NUMBER_MAX (DVFS_USER_NOTIFIER_ATOM_NUMBER_BASE - 1)
-typedef enum {
-	DVFS_REQ_REGISTER_CTX, /*only for exygpud*/
-
-	DVFS_REQ_GET_LEVEL,
-	DVFS_REQ_SET_LEVEL,
-
-	DVFS_REQ_GET_UTILIZATION,
-	DVFS_REQ_GET_MIF_TABLE,
-	DVFS_REQ_GET_INT_TABLE, //5
-	DVFS_REQ_GET_ATLAS_TABLE,
-	DVFS_REQ_GET_APOLLO_TABLE,
-
-	DVFS_REQ_GET_GPU_MIN_LOCK,
-	DVFS_REQ_SET_GPU_MIN_LOCK,
-
-	DVFS_REQ_GET_GPU_MAX_LOCK, //10
-	DVFS_REQ_SET_GPU_MAX_LOCK,
-
-	DVFS_REQ_GET_ATLAS_MIN_LOCK,
-	DVFS_REQ_SET_ATLAS_MIN_LOCK,
-
-	DVFS_REQ_GET_APOLLO_MIN_LOCK,
-	DVFS_REQ_SET_APOLLO_MIN_LOCK, //15
-
-	DVFS_REQ_GET_MIF_MIN_LOCK,
-	DVFS_REQ_SET_MIF_MIN_LOCK,
-
-	DVFS_REQ_GET_INT_MIN_LOCK,
-	DVFS_REQ_SET_INT_MIN_LOCK,
-
-	DVFS_REQ_GET_DVFS_ATTR, //20
-	DVFS_REQ_SET_DVFS_ATTR,
-
-	DVFS_REQ_GET_DVFS_TABLE,
-	DVFS_REQ_SET_DVFS_TABLE,
-
-	DVFS_REQ_HWC_DUMP,
-	DVFS_REQ_HWC_SETUP,
-
-	DVFS_REQ_MAX
-} mali_dvfs_request_type;
-
-typedef enum {
-	DVFS_JOB_EVENT_NONE,
-	DVFS_JOB_EVENT_DONE,
-	DVFS_JOB_EVENT_LOCKED,
-	DVFS_JOB_EVENT_SUSPENDED,
-	DVFS_JOB_EVENT_ERROR
-} event_type;
-
-typedef struct gpu_dvfs_job {
-	unsigned int type;
-	unsigned int data_size;
-	u64 data;
-	int event;
-}gpu_dvfs_job;
-//#endif
 
 /* Maximum number of jobs allowed in a fragment chain in the payload of a
  * replay job */

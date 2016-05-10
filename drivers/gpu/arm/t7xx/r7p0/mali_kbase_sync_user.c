@@ -40,16 +40,7 @@ static int kbase_stream_close(struct inode *inode, struct file *file)
 	struct sync_timeline *tl;
 
 	tl = (struct sync_timeline *)file->private_data;
-/* MALI_SEC_INTEGRATION */
-#ifdef MALI_SEC_INTEGRATION
 	BUG_ON(!tl);
-#else
-	if (file->private_data == NULL)
-		return 0;
-
-	if (atomic_read(&tl->kref.refcount) == 1)
-		file->private_data = NULL;
-#endif
 	sync_timeline_destroy(tl);
 	return 0;
 }

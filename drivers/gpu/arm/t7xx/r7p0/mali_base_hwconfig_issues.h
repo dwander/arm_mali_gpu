@@ -1,4 +1,5 @@
 /*
+ *
  * (C) COPYRIGHT 2015 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
@@ -9,7 +10,10 @@
  * A copy of the licence is included with the program, and can also be obtained
  * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
  * Boston, MA  02110-1301, USA.
+ *
  */
+
+
 
 /* AUTOMATICALLY GENERATED FILE. If you want to amend the issues/features,
  * please update base/tools/hwconfig_generator/hwc_{issues,features}.py
@@ -751,25 +755,6 @@ static const enum base_hw_issue base_hw_issues_model_t82x[] = {
 	BASE_HW_ISSUE_END
 };
 
-#if defined(MALI_INCLUDE_TMIX)
-static const enum base_hw_issue base_hw_issues_tMIx_r0p0[] = {
-	BASE_HW_ISSUE_9435,
-	BASE_HW_ISSUE_10821,
-	BASE_HW_ISSUE_T76X_3700,
-	BASE_HW_ISSUE_END
-};
 
-#endif /* defined(MALI_INCLUDE_TMIX) */
-
-#if defined(MALI_INCLUDE_TMIX)
-static const enum base_hw_issue base_hw_issues_model_tMIx[] = {
-	BASE_HW_ISSUE_5736,
-	BASE_HW_ISSUE_9275,
-	BASE_HW_ISSUE_9435,
-	BASE_HW_ISSUE_T76X_3700,
-	BASE_HW_ISSUE_END
-};
-
-#endif /* defined(MALI_INCLUDE_TMIX) */
 
 #endif /* _BASE_HWCONFIG_ISSUES_H_ */

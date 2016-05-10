@@ -49,25 +49,9 @@ static int kbasep_mem_profile_seq_show(struct seq_file *sfile, void *data)
 
 	KBASE_DEBUG_ASSERT(kctx != NULL);
 
-	/* MALI_SEC_INTEGRATION */
-	{
-	struct kbase_device *kbdev = kctx->kbdev;
-
-	if(kbdev->vendor_callbacks->mem_profile_check_kctx)
-		if (!kbdev->vendor_callbacks->mem_profile_check_kctx(kctx))
-			return 0;
-	}
-
-	/* MALI_SEC_INTEGRATION */
-	if (kctx->destroying_context)
-		return 0;
-
 	spin_lock(&kctx->mem_profile_lock);
-	/* MALI_SEC_INTEGRATION */
-	if (kctx->mem_profile_data) {
-		seq_write(sfile, kctx->mem_profile_data, kctx->mem_profile_size);
-		seq_putc(sfile, '\n');
-	}
+	seq_write(sfile, kctx->mem_profile_data, kctx->mem_profile_size);
+	seq_putc(sfile, '\n');
 	spin_unlock(&kctx->mem_profile_lock);
 
 	return 0;

@@ -281,9 +281,7 @@ int kbase_pm_policy_init(struct kbase_device *kbdev)
 	struct workqueue_struct *wq;
 
 	wq = alloc_workqueue("kbase_pm_do_poweroff",
-/* MALI_SEC_INTEGRATION */
-//			WQ_HIGHPRI | WQ_UNBOUND, 1);
-			WQ_HIGHPRI , 1);
+			WQ_HIGHPRI | WQ_UNBOUND, 1);
 	if (!wq)
 		return -ENOMEM;
 
@@ -294,7 +292,7 @@ int kbase_pm_policy_init(struct kbase_device *kbdev)
 			CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	kbdev->pm.backend.gpu_poweroff_timer.function =
 			kbasep_pm_do_gpu_poweroff_callback;
-	kbdev->pm.backend.pm_current_policy = policy_list[2];
+	kbdev->pm.backend.pm_current_policy = policy_list[0];
 	kbdev->pm.backend.pm_current_policy->init(kbdev);
 	kbdev->pm.gpu_poweroff_time =
 			HR_TIMER_DELAY_NSEC(DEFAULT_PM_GPU_POWEROFF_TICK_NS);
@@ -440,7 +438,6 @@ void kbase_pm_update_cores_state_nolock(struct kbase_device *kbdev)
 	if (kbdev->pm.backend.desired_shader_state != desired_bitmap)
 		KBASE_TRACE_ADD(kbdev, PM_CORES_CHANGE_DESIRED, NULL, NULL, 0u,
 							(u32)desired_bitmap);
-
 	/* Are any cores being powered on? */
 	if (~kbdev->pm.backend.desired_shader_state & desired_bitmap ||
 	    kbdev->pm.backend.ca_in_transition) {

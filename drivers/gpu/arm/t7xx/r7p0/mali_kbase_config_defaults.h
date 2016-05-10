@@ -177,14 +177,12 @@ enum {
 /*
  * Power Manager number of ticks before shader cores are powered off
  */
-/* MALI_SEC_INTEGRATION */
-#define DEFAULT_PM_POWEROFF_TICK_SHADER (0) /* 400-800us */
+#define DEFAULT_PM_POWEROFF_TICK_SHADER (2) /* 400-800us */
 
 /*
  * Power Manager number of ticks before GPU is powered off
  */
-/* MALI_SEC_INTEGRATION */
-#define DEFAULT_PM_POWEROFF_TICK_GPU (0) /* 400-800us */
+#define DEFAULT_PM_POWEROFF_TICK_GPU (2) /* 400-800us */
 
 /*
  * Default scheduling tick granuality

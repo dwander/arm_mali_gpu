@@ -171,14 +171,11 @@ static struct page *kbase_mem_pool_alloc_page(struct kbase_mem_pool *pool)
 	gfp = GFP_HIGHUSER | __GFP_ZERO;
 #endif
 
-/* MALI_SEC_INTEGRATION */
-#if 0
 	if (current->flags & PF_KTHREAD) {
 		/* Don't trigger OOM killer from kernel threads, e.g. when
 		 * growing memory on GPU page fault */
 		gfp |= __GFP_NORETRY;
 	}
-#endif
 
 	p = alloc_page(gfp);
 	if (!p)

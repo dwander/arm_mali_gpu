@@ -232,11 +232,6 @@ struct kbase_va_region {
 
 #define KBASE_REG_SECURE            (1ul << 19)
 
-/* MALI_SEC_SECURE_RENDERING */
-#define KBASE_REG_SECURE_CRC        (1ul << 20)
-	phys_addr_t phys_by_ion;
-	size_t      len_by_ion;
-
 #define KBASE_REG_ZONE_SAME_VA      KBASE_REG_ZONE(0)
 
 /* only used with 32-bit clients */

@@ -19,54 +19,10 @@
 
 #include <mali_kbase.h>
 #include <mali_kbase_debug.h>
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-#include <lockdep.h>
-#endif
 
 #if defined(CONFIG_MALI_MIPE_ENABLED)
 #include <mali_kbase_tlstream.h>
 #endif
-
-/* MALI_SEC_INTEGRATION */
-static bool kbase_event_check_error(struct kbase_context *kctx, struct kbase_jd_atom *katom, base_jd_udata *data)
-{
-	pgd_t *pgd;
-	struct mm_struct *mm;
-
-	memset(data->blob, 0, sizeof(data->blob));
-
-	if (!kctx || !katom) {
-		printk("kctx: 0x%p, katom: 0x%p\n", kctx, katom);
-		return false;
-	}
-
-	if (katom->status != KBASE_JD_ATOM_STATE_COMPLETED) {
-		printk("Abnormal situation\n");
-		printk("kctx: 0x%p, katom: 0x%p, katom->status: 0x%x\n", kctx, katom, katom->status);
-		return false;
-	}
-
-	mm  = katom->kctx->process_mm;
-	pgd = pgd_offset(mm, (unsigned long)&katom->completed);
-	if (pgd_none(*pgd) || pgd_bad(*pgd)) {
-		printk("Abnormal katom\n");
-		printk("katom->kctx: 0x%p, katom->kctx->tgid: %d, katom->kctx->process_mm: 0x%p, pgd: 0x%px\n", katom->kctx, katom->kctx->tgid, katom->kctx->process_mm, pgd);
-		return false;
-	}
-
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-	if (katom->completed.lock.dep_map.key) {
-		pgd = pgd_offset(mm, (unsigned long)&katom->completed.lock.dep_map.key);
-		if (pgd_none(*pgd) || pgd_bad(*pgd)) {
-			printk("Abnormal katom 2\n");
-			printk("katom->kctx: 0x%p, katom->kctx->tgid: %d, katom->kctx->process_mm: 0x%p, pgd: 0x%px\n", katom->kctx, katom->kctx->tgid, katom->kctx->process_mm, pgd);
-			return false;
-		}
-	}
-#endif
-
-	return true;
-}
 
 static struct base_jd_udata kbase_event_process(struct kbase_context *kctx, struct kbase_jd_atom *katom)
 {
@@ -77,10 +33,6 @@ static struct base_jd_udata kbase_event_process(struct kbase_context *kctx, stru
 	KBASE_DEBUG_ASSERT(kctx != NULL);
 	KBASE_DEBUG_ASSERT(katom != NULL);
 	KBASE_DEBUG_ASSERT(katom->status == KBASE_JD_ATOM_STATE_COMPLETED);
-
-	/* MALI_SEC_INTEGRATION */
-	if(kbase_event_check_error(kctx, katom, &data) == false)
-		return data;
 
 	data = katom->udata;
 

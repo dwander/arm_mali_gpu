@@ -62,16 +62,14 @@
 
 #include <linux/clk.h>
 #include <linux/regulator/consumer.h>
-/* MALI_SEC_INTEGRATION */
-#include <platform/exynos/gpu_integration_defs.h>
+
 #if defined(CONFIG_PM_RUNTIME) || \
 	(defined(CONFIG_PM) && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0))
 #define KBASE_PM_RUNTIME 1
 #endif
 
 /** Enable SW tracing when set */
-/* MALI_SEC_INTEGRATION */
-#if defined(CONFIG_MALI_MIDGARD_ENABLE_TRACE) || defined(CONFIG_MALI_EXYNOS_TRACE)
+#ifdef CONFIG_MALI_MIDGARD_ENABLE_TRACE
 #define KBASE_TRACE_ENABLE 1
 #endif
 
@@ -154,12 +152,7 @@
 #define KBASE_LOCK_REGION_MAX_SIZE (63)
 #define KBASE_LOCK_REGION_MIN_SIZE (11)
 
-/* MALI_SEC_INTEGRATION */
-#ifdef CONFIG_MALI_EXYNOS_TRACE
-#define KBASE_TRACE_SIZE_LOG2 10	/* 1024 entries */
-#else
 #define KBASE_TRACE_SIZE_LOG2 8	/* 256 entries */
-#endif
 #define KBASE_TRACE_SIZE (1 << KBASE_TRACE_SIZE_LOG2)
 #define KBASE_TRACE_MASK ((1 << KBASE_TRACE_SIZE_LOG2)-1)
 
@@ -325,16 +318,6 @@ struct kbase_ext_res {
 	struct kbase_mem_phy_alloc *alloc;
 };
 
-#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
-/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
-struct kbase_atom_dependency_systrace
-{
-    unsigned int dep_atom_id;
-    unsigned int dep_atom_dependency_type;
-};
-#endif
-/* SRUK-MALI_SYSTRACE_SUPPORT }*/
-
 struct kbase_jd_atom {
 	struct work_struct work;
 	ktime_t start_timestamp;
@@ -362,10 +345,6 @@ struct kbase_jd_atom {
 #ifdef CONFIG_SYNC
 	struct sync_fence *fence;
 	struct sync_fence_waiter sync_waiter;
-/* MALI_SEC_INTEGRATION */
-	spinlock_t fence_lock;
-	struct mutex fence_mt;
-	struct timer_list fence_timer;
 #endif				/* CONFIG_SYNC */
 
 	/* Note: refer to kbasep_js_atom_retained_state, which will take a copy of some of the following members */
@@ -412,15 +391,6 @@ struct kbase_jd_atom {
 #ifdef CONFIG_DEBUG_FS
 	struct base_job_fault_event fault_event;
 #endif
-
-/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
-#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
-
-    struct kbase_atom_dependency_systrace kbase_atom_dep_systrace[2];
-    u32 gles_ctx_handle;
-
-#endif
-/* SRUK-MALI_SYSTRACE_SUPPORT }*/
 };
 
 static inline bool kbase_jd_katom_is_secure(const struct kbase_jd_atom *katom)
@@ -576,11 +546,7 @@ struct kbase_trace {
 	u64 atom_udata[2];
 	u64 gpu_addr;
 	unsigned long info_val;
-#ifdef CONFIG_MALI_EXYNOS_TRACE
-	enum kbase_trace_code code;
-#else
 	u8 code;
-#endif
 	u8 jobslot;
 	u8 refcount;
 	u8 flags;
@@ -694,9 +660,6 @@ struct kbase_pm_device_data {
 	int active_count;
 	/** Flag indicating suspending/suspended */
 	bool suspending;
-
-	/* MALI_SEC_INTEGRATION */
-	wait_queue_head_t suspending_wait;
 	/* Wait queue set when active_count == 0 */
 	wait_queue_head_t zero_active_count_wait;
 
@@ -772,45 +735,8 @@ struct kbase_secure_ops {
 	 * Return: 0 on success, non-zero on error
 	 */
 	int (*secure_mode_disable)(struct kbase_device *kbdev);
-
-/* MALI_SEC_SECURE_RENDERING */
-	/** Platform specific function for initializing the secure region
-	 *
-	 * Return 0 if successful, otherwise error
-	 */
-	 int (*secure_mode_init)(struct kbase_device *kbdev);
-
-/* MALI_SEC_SECURE_RENDERING */
-	/** Platform specific function for setting the Memory to secure mode.
-	 *
-	 * Return 0 if successful, otherwise error
-	 */
-	int (*secure_mem_enable)(struct kbase_device *kbdev, int ion_fd, u64 flags, struct kbase_va_region *reg);
-
-/* MALI_SEC_SECURE_RENDERING */
-	/** Platform specific function for setting the Memory back to normal mode.
-	 *
-	 * Return 0 if successful, otherwise error
-	 */
-	int (*secure_mem_disable)(struct kbase_device *kbdev, struct kbase_va_region *reg);
 };
 
-/* MALI_SEC_SECURE_RENDERING */
-typedef struct sec_sr_resources {
-	u64             secure_flags_crc_asp;
-
-	phys_addr_t     secure_crc_phys;
-	size_t          secure_crc_sizes;
-} sec_sr_resources;
-
-#ifdef MALI_SEC_HWCNT
-typedef struct hwc_resources {
-	u32 arith_words;
-	u32 ls_issues;
-	u32 tex_issues;
-	u32 tripipe_active;
-} hwc_resources;
-#endif
 
 /**
  * struct kbase_mem_pool - Page based memory pool for kctx/kbdev
@@ -957,20 +883,6 @@ struct kbase_device {
 		struct kbase_uk_hwcnt_setup suspended_state;
 
 		struct kbase_instr_backend backend;
-
-#ifdef MALI_SEC_HWCNT
-		s32 hwcnt_fd;
-		struct mutex mlock;
-		bool is_hwcnt_attach;
-		bool is_hwcnt_enable;
-		bool is_hwcnt_gpr_enable;
-		bool is_hwcnt_force_stop;
-		u32 timeout;
-		struct hwc_resources resources;
-		struct hwc_resources resources_log;
-		u32 cnt_for_bt_start;
-		u32 cnt_for_bt_stop;
-#endif
 	} hwcnt;
 
 	struct kbase_vinstr_context *vinstr_ctx;
@@ -1045,10 +957,7 @@ struct kbase_device {
 	struct dentry *mali_debugfs_directory;
 	/* Root directory for per context entry */
 	struct dentry *debugfs_ctx_directory;
-#ifndef MALI_SEC_INTEGRATION
-	/* debugfs entry for trace */
-	struct dentry *trace_dentry;
-#endif /* MALI_SEC_INTEGRATION */
+
 	/* failed job dump, used for separate debug process */
 	bool job_fault_debug;
 	wait_queue_head_t job_fault_wq;
@@ -1118,22 +1027,12 @@ struct kbase_device {
 	bool driver_inactive;
 #endif /* CONFIG_MALI_DEBUG */
 
-	/*
-	 * MALI_SEC_SECURE_RENDERING
-	 *
-	 * information for secure ASP setting
-	 *
-	 */
-	sec_sr_resources sec_sr_info;
-
 #ifdef CONFIG_MALI_FPGA_BUS_LOGGER
 	/*
 	 * Bus logger integration.
 	 */
 	struct bus_logger_client *buslogger;
 #endif
-	/* MALI_SEC_INTEGRATION */
-	struct kbase_vendor_callbacks *vendor_callbacks;
 };
 
 /* JSCTX ringbuffer size must always be a power of 2 */
@@ -1297,17 +1196,6 @@ struct kbase_context {
 	struct list_head completed_jobs;
 	/* Number of work items currently pending on job_done_wq */
 	atomic_t work_count;
-
-	/* MALI_SEC_INTEGRATION */
-	int ctx_status;
-	bool ctx_need_qos;
-	char name[CTX_NAME_SIZE];
-
-	/* MALI_SEC_SECURE_RENDERING */
-	bool enabled_TZASC;
-
-	/* MALI_SEC_INTEGRATION */
-	bool destroying_context;
 };
 
 enum kbase_reg_access_type {

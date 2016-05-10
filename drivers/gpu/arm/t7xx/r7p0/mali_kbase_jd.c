@@ -39,10 +39,6 @@
 #include <mali_kbase_tlstream.h>
 #endif
 
-/* MALI_SEC_INTEGRATION */
-#include <linux/exynos_ion.h>
-#include "platform/exynos/gpu_integration_defs.h"
-
 #define beenthere(kctx, f, a...)  dev_dbg(kctx->kbdev->dev, "%s:" f, __func__, ##a)
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 8, 0)
@@ -230,18 +226,7 @@ static int kbase_jd_umm_map(struct kbase_context *kctx, struct kbase_va_region *
 
 	for_each_sg(sgt->sgl, s, sgt->nents, i) {
 		int j;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 17, 0)
 		size_t pages = PFN_UP(sg_dma_len(s));
-#else
-		size_t pages = PFN_UP(s->length);
-#endif
-
-		/* MALI_SEC_INTEGRATION */
-		if (WARN(s == NULL, "s is NULL goto errout\n")) {
-			err = -EINVAL;
-			goto out;
-		}
-
 
 		WARN_ONCE(sg_dma_len(s) & (PAGE_SIZE-1),
 		"sg_dma_len(s)=%u is not a multiple of PAGE_SIZE\n",
@@ -273,8 +258,6 @@ static int kbase_jd_umm_map(struct kbase_context *kctx, struct kbase_va_region *
 out:
 	if (err) {
 		dma_buf_unmap_attachment(alloc->imported.umm.dma_attachment, alloc->imported.umm.sgt, DMA_BIDIRECTIONAL);
-		/* MALI_SEC_INTEGRATION */
-		exynos_ion_sync_dmabuf_for_device(kctx->kbdev->dev, alloc->imported.umm.dma_buf, alloc->imported.umm.dma_buf->size, DMA_BIDIRECTIONAL);
 		alloc->imported.umm.sgt = NULL;
 	}
 
@@ -921,26 +904,6 @@ bool jd_submit_atom(struct kbase_context *kctx,
 	katom->need_cache_flush_cores_retained = 0;
 	katom->x_pre_dep = NULL;
 	katom->x_post_dep = NULL;
-
-/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
-#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
-
-    /** Initialisation & copying user-side gles context handle
-        - Initialise dependency information
-        - Copy user gles context handle to kernel side
-    */
-    katom->kbase_atom_dep_systrace[0].dep_atom_id =0;
-    katom->kbase_atom_dep_systrace[0].dep_atom_dependency_type =BASE_JD_DEP_TYPE_INVALID; // 0
-
-    katom->kbase_atom_dep_systrace[1].dep_atom_id = 0;
-    katom->kbase_atom_dep_systrace[1].dep_atom_dependency_type= BASE_JD_DEP_TYPE_INVALID; //0
-
-    katom->gles_ctx_handle = user_atom->gles_ctx_handle; //SRUK gles context passing
-    //printk("[dongsung_trace] %s katom->gles_ctx_handle %x user_atom->gles_ctx_handle %x\n ",__func__,katom->gles_ctx_handle,user_atom->gles_ctx_handle);
-
-#endif
-/* SRUK-MALI_SYSTRACE_SUPPORT }*/
-
 #ifdef CONFIG_KDS
 	/* Start by assuming that the KDS dependencies are satisfied,
 	 * kbase_jd_pre_external_resources will correct this if there are dependencies */
@@ -983,20 +946,6 @@ bool jd_submit_atom(struct kbase_context *kctx,
 
 		dep_atom_type = user_atom->pre_dep[i].dependency_type;
 		kbase_jd_katom_dep_clear(&katom->dep[i]);
-
-/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
-#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
-
-        if(katom->kbase_atom_dep_systrace[i].dep_atom_id != 0 && katom->kbase_atom_dep_systrace[i].dep_atom_dependency_type !=0)
-        {
-            printk("%s Atom dependency Overwritten!!!! dep_atom_id %d dep_atom_dependency_type %d \n",__func__, katom->kbase_atom_dep_systrace[i].dep_atom_id, katom->kbase_atom_dep_systrace[i].dep_atom_dependency_type);
-        }
-
-        // save dependency of atom
-        katom->kbase_atom_dep_systrace[i].dep_atom_id = dep_atom_number;
-        katom->kbase_atom_dep_systrace[i].dep_atom_dependency_type = dep_atom_type;
-#endif
-/* SRUK-MALI_SYSTRACE_SUPPORT }*/
 
 		if (!dep_atom_number)
 			continue;
@@ -1800,7 +1749,6 @@ int kbase_jd_init(struct kbase_context *kctx)
 		/* Catch userspace attempting to use an atom which doesn't exist as a pre-dependency */
 		kctx->jctx.atoms[i].event_code = BASE_JD_EVENT_JOB_INVALID;
 		kctx->jctx.atoms[i].status = KBASE_JD_ATOM_STATE_UNUSED;
-		spin_lock_init(&kctx->jctx.atoms[i].fence_lock);
 	}
 
 	mutex_init(&kctx->jctx.lock);

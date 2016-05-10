@@ -126,10 +126,6 @@ kbase_create_context(struct kbase_device *kbdev, bool is_compat)
 
 	mutex_init(&kctx->vinstr_cli_lock);
 
-	/* MALI_SEC_INTEGRATION */
-	if (kbdev->vendor_callbacks->create_context)
-		kbdev->vendor_callbacks->create_context(kctx);
-
 	return kctx;
 
 no_region_tracker:
@@ -177,25 +173,10 @@ void kbase_destroy_context(struct kbase_context *kctx)
 	int pages;
 	unsigned long pending_regions_to_clean;
 
-	/* MALI_SEC_INTEGRATION */
-	if (!kctx) {
-		printk("An uninitialized or destroyed context is tried to be destroyed. kctx is null\n");
-		return ;
-	}
-	else if (kctx->ctx_status != CTX_INITIALIZED) {
-		printk("An uninitialized or destroyed context is tried to be destroyed\n");
-		printk("kctx: 0x%p, kctx->tgid: %d, kctx->ctx_status: 0x%x\n", kctx, kctx->tgid, kctx->ctx_status);
-		return ;
-	}
-
 	KBASE_DEBUG_ASSERT(NULL != kctx);
 
 	kbdev = kctx->kbdev;
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
-
-	/* MALI_SEC_INTEGRATION */
-	while (wait_event_timeout(kbdev->pm.suspending_wait, kbdev->pm.suspending == false, (unsigned int) msecs_to_jiffies(1000)) == 0)
-		printk("[G3D] Waiting for resuming the device\n");
 
 	KBASE_TRACE_ADD(kbdev, CORE_CTX_DESTROY, kctx, NULL, 0u, 0u);
 
@@ -247,17 +228,7 @@ void kbase_destroy_context(struct kbase_context *kctx)
 	kbase_mem_pool_term(&kctx->mem_pool);
 	WARN_ON(atomic_read(&kctx->nonmapped_pages) != 0);
 
-	/* MALI_SEC_INTEGRATION */
-	if(kbdev->vendor_callbacks->destroy_context)
-		kbdev->vendor_callbacks->destroy_context(kctx);
-
-	if (kctx->ctx_need_qos) {
-		kctx->ctx_need_qos = false;
-	}
-
 	vfree(kctx);
-	/* MALI_SEC_INTEGRATION */
-	kctx = NULL;
 }
 KBASE_EXPORT_SYMBOL(kbase_destroy_context);
 

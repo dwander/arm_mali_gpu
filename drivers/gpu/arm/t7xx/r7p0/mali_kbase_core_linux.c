@@ -1180,22 +1180,6 @@ copy_failed:
 			break;
 		}
 
-	/* MALI_SEC_INTEGRATION */
-#ifdef MALI_SEC_HWCNT
-	case KBASE_FUNC_HWCNT_UTIL_SETUP:
-	case KBASE_FUNC_HWCNT_GPR_DUMP:
-	case KBASE_FUNC_VSYNC_SKIP:
-#endif
-	case KBASE_FUNC_TMU_SKIP:
-	case KBASE_FUNC_CREATE_SURFACE:
-	case KBASE_FUNC_DESTROY_SURFACE:
-	case KBASE_FUNC_SET_MIN_LOCK :
-	case KBASE_FUNC_UNSET_MIN_LOCK :
-	case KBASE_FUNC_SECURE_WORLD_RENDERING :
-	case KBASE_FUNC_NON_SECURE_WORLD_RENDERING :
-		ukh->id = id;
-		return gpu_vendor_dispatch(kctx, args, args_size);
-
 	default:
 		dev_err(kbdev->dev, "unknown ioctl %u", id);
 		goto out_bad;
@@ -1394,9 +1378,7 @@ static int kbase_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-/* MALI_SEC_INTEGRATION */
-//#define CALL_MAX_SIZE 536
-#define CALL_MAX_SIZE	(KBASE_FUNC_MAX - 1)
+#define CALL_MAX_SIZE 536
 
 static long kbase_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
@@ -3065,6 +3047,7 @@ static DEVICE_ATTR(mem_pool_max_size, S_IRUGO | S_IWUSR, show_mem_pool_max_size,
 
 static int kbasep_secure_mode_init(struct kbase_device *kbdev)
 {
+
 #ifdef SECURE_CALLBACKS
 	kbdev->secure_ops = SECURE_CALLBACKS;
 	kbdev->secure_mode_support = false;
@@ -3072,18 +3055,12 @@ static int kbasep_secure_mode_init(struct kbase_device *kbdev)
 	if (kbdev->secure_ops) {
 		int err;
 
-		/* MALI_SEC_SECURE_RENDERING */
-		/* removed below code : Make sure secure mode msut be called by job manager before seucre rendering */
-		err = kbdev->secure_ops->secure_mode_init(kbdev);
+		/* Make sure secure mode is disabled on startup */
+		err = kbdev->secure_ops->secure_mode_disable(kbdev);
 
-		/* MALI_SEC_SECURE_RENDERING */
-		/* secure_mode_init() returns 0 < value if not supported */
-		if (!err)
-			kbdev->secure_mode_support = true;
+		/* secure_mode_disable() returns -EINVAL if not supported */
+		kbdev->secure_mode_support = (err != -EINVAL);
 	}
-/* MALI_SEC_SECURE_RENDERING */
-#else
-	kbdev->secure_mode_support = false;
 #endif
 
 	return 0;
@@ -3194,39 +3171,21 @@ static const struct file_operations kbasep_secure_mode_debugfs_fops = {
 	.release = single_release,
 };
 
-#ifndef MALI_SEC_INTEGRATION
-extern const struct file_operations kbasep_trace_debugfs_fops;
-#endif /* MALI_SEC_INTEGRATION */
-
 static int kbase_device_debugfs_init(struct kbase_device *kbdev)
 {
 	struct dentry *debugfs_ctx_defaults_directory;
 	int err;
 
-#ifdef MALI_SEC_INTEGRATION
 	kbdev->mali_debugfs_directory = debugfs_create_dir(kbdev->devname,
 			NULL);
-#else
-	kbdev->mali_debugfs_directory = debugfs_create_dir("mali",
-			NULL);
-#endif /* MALI_SEC_INTEGRATION */
 	if (!kbdev->mali_debugfs_directory) {
 		dev_err(kbdev->dev, "Couldn't create mali debugfs directory\n");
 		err = -ENOMEM;
 		goto out;
 	}
 
-#ifdef MALI_SEC_INTEGRATION
 	kbdev->debugfs_ctx_directory = debugfs_create_dir("ctx",
 			kbdev->mali_debugfs_directory);
-#else
-	kbdev->trace_dentry = debugfs_create_file("mali_trace", S_IRUGO,
-			kbdev->mali_debugfs_directory, kbdev,
-			&kbasep_trace_debugfs_fops);
-
-	kbdev->debugfs_ctx_directory = debugfs_create_dir("mem",
-			kbdev->mali_debugfs_directory);
-#endif /* MALI_SEC_INTEGRATION */
 	if (!kbdev->debugfs_ctx_directory) {
 		dev_err(kbdev->dev, "Couldn't create mali debugfs ctx directory\n");
 		err = -ENOMEM;
@@ -3360,9 +3319,7 @@ static void kbase_logging_started_cb(void *data)
 static int kbase_common_device_init(struct kbase_device *kbdev)
 {
 	int err;
-#if defined(CONFIG_MALI_PLATFORM_VEXPRESS)
 	struct mali_base_gpu_core_props *core_props;
-#endif
 	enum {
 		inited_mem = (1u << 0),
 		inited_js = (1u << 1),
@@ -3398,8 +3355,6 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 
 	kbase_disjoint_init(kbdev);
 
-/* MALI_SEC_INTEGRATION */ /* Move vexpress definition to here */
-#if defined(CONFIG_MALI_PLATFORM_VEXPRESS)
 	/* obtain min/max configured gpu frequencies */
 	core_props = &(kbdev->gpu_props.props.core_props);
 
@@ -3410,7 +3365,7 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 	 * min and max GPU frequency is obtained, the type of the logic tile is
 	 * read from the corresponding register on the platform and frequency
 	 * values assigned accordingly.*/
-
+#if defined(CONFIG_MALI_PLATFORM_VEXPRESS)
 	ve_logic_tile = kbase_get_platform_logic_tile_type();
 
 	switch (ve_logic_tile) {
@@ -3432,7 +3387,10 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 		core_props->gpu_freq_khz_max = GPU_FREQ_KHZ_MAX;
 		break;
 	}
- #endif /* CONFIG_MALI_PLATFORM_VEXPRESS */
+#else
+		core_props->gpu_freq_khz_min = GPU_FREQ_KHZ_MIN;
+		core_props->gpu_freq_khz_max = GPU_FREQ_KHZ_MAX;
+#endif /* CONFIG_MALI_PLATFORM_VEXPRESS */
 
 	kbdev->gpu_props.irq_throttle_time_us = DEFAULT_IRQ_THROTTLE_TIME_US;
 
@@ -3443,10 +3401,6 @@ static int kbase_common_device_init(struct kbase_device *kbdev)
 	}
 
 	inited |= inited_device;
-
-#ifdef MALI_SEC_HWCNT
-	mutex_init(&kbdev->hwcnt.mlock);
-#endif
 
 	kbdev->vinstr_ctx = kbase_vinstr_init(kbdev);
 	if (!kbdev->vinstr_ctx) {
@@ -3666,8 +3620,7 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 			goto out_platform_irq;
 		}
 
-/* MALI_SEC_INTEGRATION */
-#if 0 /* #ifdef CONFIG_OF */
+#ifdef CONFIG_OF
 		if (!strcmp(irq_res->name, "JOB")) {
 			irqtag = JOB_IRQ_TAG;
 		} else if (!strcmp(irq_res->name, "MMU")) {
@@ -3702,7 +3655,6 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 		if (err)
 			goto out_reg_map;
 
-#ifdef CONFIG_MALI_MIDGARD_DVFS
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0)) && defined(CONFIG_OF) \
 			&& defined(CONFIG_REGULATOR)
 	kbdev->regulator = regulator_get_optional(kbdev->dev, "mali");
@@ -3712,12 +3664,10 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 		/* Allow probe to continue without regulator */
 	}
 #endif /* LINUX_VERSION_CODE >= 3, 12, 0 */
-#endif
 
 #ifdef CONFIG_MALI_PLATFORM_DEVICETREE
 	pm_runtime_enable(kbdev->dev);
 #endif
-#ifdef CONFIG_HAVE_CLK
 	kbdev->clock = clk_get(kbdev->dev, "clk_mali");
 	if (IS_ERR_OR_NULL(kbdev->clock)) {
 		dev_info(kbdev->dev, "Continuing without Mali clock control\n");
@@ -3731,15 +3681,14 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 			goto out_clock_prepare;
 		}
 	}
-#endif
-#ifdef CONFIG_MALI_MIDGARD_DVFS
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0)) && defined(CONFIG_OF) \
 			&& defined(CONFIG_PM_OPP)
 	/* Register the OPPs if they are available in device tree */
 	if (of_init_opp_table(kbdev->dev) < 0)
 		dev_dbg(kbdev->dev, "OPP table not found\n");
 #endif
-#endif
+
 
 	err = kbase_common_device_init(kbdev);
 	if (err) {
@@ -3778,25 +3727,20 @@ out_common_init:
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0))
 	of_free_opp_table(kbdev->dev);
 #endif
-#ifdef CONFIG_HAVE_CLK
 	clk_disable_unprepare(kbdev->clock);
 out_clock_prepare:
 	clk_put(kbdev->clock);
-#endif
 #ifdef CONFIG_MALI_PLATFORM_DEVICETREE
 	pm_runtime_disable(kbdev->dev);
 #endif
-#ifdef CONFIG_MALI_MIDGARD_DVFS
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0)) && defined(CONFIG_OF) \
 			&& defined(CONFIG_REGULATOR)
 	regulator_put(kbdev->regulator);
 #endif /* LINUX_VERSION_CODE >= 3, 12, 0 */
-#endif
 		kbase_common_reg_unmap(kbdev);
 out_reg_map:
 out_platform_mem:
-/* MALI_SEC_INTEGRATION */
-#if 0 /* #ifdef CONFIG_OF */
+#ifdef CONFIG_OF
 out_irq_name:
 #endif
 out_platform_irq:
@@ -3811,13 +3755,6 @@ out:
 
 static int kbase_common_device_remove(struct kbase_device *kbdev)
 {
-#ifdef MALI_SEC_HWCNT
-	mutex_lock(&kbdev->hwcnt.mlock);
-	if(kbdev->vendor_callbacks->hwcnt_detach)
-		kbdev->vendor_callbacks->hwcnt_detach(kbdev);
-	mutex_unlock(&kbdev->hwcnt.mlock);
-#endif
-
 	kbase_ipa_term(kbdev->ipa_ctx);
 	kbase_vinstr_term(kbdev->vinstr_ctx);
 	sysfs_remove_group(&kbdev->dev->kobj, &kbase_attr_group);
@@ -3863,19 +3800,15 @@ static int kbase_common_device_remove(struct kbase_device *kbdev)
 	put_device(kbdev->dev);
 		kbase_common_reg_unmap(kbdev);
 	kbase_device_term(kbdev);
-#ifdef CONFIG_HAVE_CLK
 	if (kbdev->clock) {
 		clk_disable_unprepare(kbdev->clock);
 		clk_put(kbdev->clock);
 		kbdev->clock = NULL;
 	}
-#endif
-#ifdef CONFIG_MALI_MIDGARD_DVFS
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0)) && defined(CONFIG_OF) \
 			&& defined(CONFIG_REGULATOR)
 	regulator_put(kbdev->regulator);
 #endif /* LINUX_VERSION_CODE >= 3, 12, 0 */
-#endif
 #ifdef CONFIG_MALI_NO_MALI
 	gpu_device_destroy(kbdev);
 #endif /* CONFIG_MALI_NO_MALI */
@@ -3902,16 +3835,10 @@ static int kbase_platform_device_remove(struct platform_device *pdev)
  *
  * @return A standard Linux error code
  */
-
-/* MALI_SEC_INTEGRATION */
-static int kbase_device_suspend_dummy(struct device *dev)
+static int kbase_device_suspend(struct device *dev)
 {
-	return 0;
-}
+	struct kbase_device *kbdev = to_kbase_device(dev);
 
-/* MALI_SEC_INTEGRATION */
-int kbase_device_suspend(struct kbase_device *kbdev)
-{
 	if (!kbdev)
 		return -ENODEV;
 
@@ -3932,16 +3859,10 @@ int kbase_device_suspend(struct kbase_device *kbdev)
  *
  * @return A standard Linux error code
  */
-
-/* MALI_SEC_INTEGRATION */
-static int kbase_device_resume_dummy(struct device *dev)
+static int kbase_device_resume(struct device *dev)
 {
-	return 0;
-}
+	struct kbase_device *kbdev = to_kbase_device(dev);
 
-/* MALI_SEC_INTEGRATION */
-int kbase_device_resume(struct kbase_device *kbdev)
-{
 	if (!kbdev)
 		return -ENODEV;
 
@@ -3975,10 +3896,6 @@ static int kbase_device_runtime_suspend(struct device *dev)
 		(LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
 	devfreq_suspend_device(kbdev->devfreq);
 #endif
-
-/* MALI_SEC_INTEGRATION */
-	if (kbdev->pm.active_count > 0)
-		return -EBUSY;
 
 	if (kbdev->pm.backend.callback_power_runtime_off) {
 		kbdev->pm.backend.callback_power_runtime_off(kbdev);
@@ -4041,9 +3958,8 @@ static int kbase_device_runtime_idle(struct device *dev)
 /** The power management operations for the platform driver.
  */
 static const struct dev_pm_ops kbase_pm_ops = {
-	/* MALI_SEC_INTEGRATION */
-	.suspend = kbase_device_suspend_dummy,
-	.resume = kbase_device_resume_dummy,
+	.suspend = kbase_device_suspend,
+	.resume = kbase_device_resume,
 #ifdef KBASE_PM_RUNTIME
 	.runtime_suspend = kbase_device_runtime_suspend,
 	.runtime_resume = kbase_device_runtime_resume,
@@ -4060,15 +3976,6 @@ static const struct of_device_id kbase_dt_ids[] = {
 MODULE_DEVICE_TABLE(of, kbase_dt_ids);
 #endif
 
-/* MALI_SEC_INTEGRATION */
-#ifdef CONFIG_OF
-static const struct of_device_id exynos_mali_match[] = {
-	{ .compatible = "arm,mali", },
-	{},
-};
-MODULE_DEVICE_TABLE(of, exynos_mali_match);
-#endif
-
 static struct platform_driver kbase_platform_driver = {
 	.probe = kbase_platform_device_probe,
 	.remove = kbase_platform_device_remove,
@@ -4076,8 +3983,7 @@ static struct platform_driver kbase_platform_driver = {
 		   .name = kbase_drv_name,
 		   .owner = THIS_MODULE,
 		   .pm = &kbase_pm_ops,
-		   /* MALI_SEC_INTEGRATION */
-		   .of_match_table = exynos_mali_match, /* .of_match_table = of_match_ptr(kbase_dt_ids), */
+		   .of_match_table = of_match_ptr(kbase_dt_ids),
 	},
 };
 
@@ -4192,58 +4098,6 @@ void kbase_trace_mali_total_alloc_pages_change(long long int event)
 	trace_mali_total_alloc_pages_change(event);
 }
 #endif /* CONFIG_MALI_GATOR_SUPPORT */
-#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
-/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
-// Create the trace points (otherwise we just get code to call a tracepoint)
-#define CREATE_TRACE_POINTS
-#include "mali_linux_systrace.h"
-/**
- * Called on job events to trigger ftrace logging
- * Pass the even type, job slot, context, atom_id (job identifier in a context?), job start timestamp (this is unique and used to track the job)
- */
-void kbase_systrace_mali_job_slots_event(u8 job_event, u8 job_slot, const struct kbase_context *kctx, u8 atom_id, u64 start_timestamp, u8 dep_0_id, u8 dep_0_type, u8 dep_1_id, u8 dep_1_type, u32 gles_ctx_handle)
-{
-    {
-            unsigned int unit;
-            char job_name[32];
-
-            switch (job_slot) {
-            case 0:
-                    unit = GPU_UNIT_FP;
-                    strcpy(job_name, "fragment-job");
-                    break;
-            case 1:
-                    unit = GPU_UNIT_VP;
-                    strcpy(job_name, "vertex-job");
-                    break;
-            case 2:
-                    unit = GPU_UNIT_CL;
-                    strcpy(job_name, "compute-job");
-                    break;
-            default:
-                    unit = GPU_UNIT_NONE;
-            }
-
-            if (unit != GPU_UNIT_NONE) {
-                    switch (job_event) {
-                    case SYSTRACE_EVENT_TYPE_START:
-                            trace_mali_job_systrace_event_start(job_name, (kctx != NULL ? kctx->tgid : 0), (kctx != NULL ? kctx->pid : 0),
-                                                                atom_id, (kctx != NULL ? kctx->id : 0), (kctx != NULL ? kctx->cookies : 0),
-                                                                start_timestamp, dep_0_id, dep_0_type, dep_1_id, dep_1_type, gles_ctx_handle);
-                            break;
-                    case SYSTRACE_EVENT_TYPE_STOP:
-                    default: // Some jobs can be soft-stopped, so ensure that this terminates the activity trace.
-                            trace_mali_job_systrace_event_stop(job_name, (kctx != NULL ? kctx->tgid : 0), (kctx != NULL ? kctx->id : 0),
-                                                               atom_id, (kctx != NULL ? kctx->id : 0), (kctx != NULL ? kctx->cookies : 0),
-                                                               start_timestamp, dep_0_id, dep_0_type, dep_1_id, dep_1_type, gles_ctx_handle);
-                            break;
-                    }
-            }
-    }
-
-}
-#endif /* CONFIG_MALI_SYSTRACE_SUPPORT */
-/* SRUK-MALI_SYSTRACE_SUPPORT }*/
 #ifdef CONFIG_MALI_SYSTEM_TRACE
 #include "mali_linux_kbase_trace.h"
 #endif

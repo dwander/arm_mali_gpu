@@ -187,17 +187,6 @@ struct kbase_pm_callback_conf {
 	 * Note: for linux the kernel must have CONFIG_PM_RUNTIME enabled to use this feature.
 	 */
 	int (*power_runtime_on_callback)(struct kbase_device *kbdev);
-
-/* MALI_SEC_INTEGRATION */
-	/** Callback for GPU DVFS handler start/stop
-	**/
-	int (*power_dvfs_on_callback)(struct kbase_device *kbdev);
-
-/* MALI_SEC_INTEGRATION */
-	/** Callback for change DVFS level as fixed clock
-	 **/
-	int (*power_change_dvfs_level_callback)(struct kbase_device *kbdev);
-
 };
 
 /**

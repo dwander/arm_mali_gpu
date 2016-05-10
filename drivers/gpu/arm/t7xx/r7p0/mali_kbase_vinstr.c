@@ -54,7 +54,12 @@
 
 /*****************************************************************************/
 
-/* MALI_SEC_INTEGRATION - move enum to mali_kbase_vinstr.h */
+enum {
+	SHADER_HWCNT_BM,
+	TILER_HWCNT_BM,
+	MMU_L2_HWCNT_BM,
+	JM_HWCNT_BM
+};
 
 /**
  * struct kbase_vinstr_context - vinstr context per device
@@ -231,7 +236,7 @@ static size_t kbasep_vinstr_dump_size(struct kbase_vinstr_context *vinstr_ctx)
 		nr_cg = kbdev->gpu_props.num_core_groups;
 		dump_size = nr_cg * NR_CNT_BLOCKS_PER_GROUP *
 				NR_CNT_PER_BLOCK *
-				NR_BYTES_PER_CNT * 2;
+				NR_BYTES_PER_CNT;
 	} else {
 		/* assume v5 for now */
 		base_gpu_props *props = &kbdev->gpu_props.props;
@@ -242,7 +247,7 @@ static size_t kbasep_vinstr_dump_size(struct kbase_vinstr_context *vinstr_ctx)
 		/* JM and tiler counter blocks are always present */
 		dump_size = (2 + nr_l2 + nr_blocks) *
 				NR_CNT_PER_BLOCK *
-				NR_BYTES_PER_CNT * 2;
+				NR_BYTES_PER_CNT;
 	}
 	return dump_size;
 }
@@ -313,14 +318,8 @@ static int kbasep_vinstr_create_kctx(struct kbase_vinstr_context *vinstr_ctx)
 		kbasep_vinstr_unmap_kernel_dump_buffer(vinstr_ctx);
 		kbase_destroy_context(vinstr_ctx->kctx);
 		vinstr_ctx->kctx = NULL;
-		GPU_LOG(DVFS_WARNING, DUMMY, 0u, 0u, "skip enable in attach hwcnt %d \n", err);
 		return err;
 	}
-
-#ifdef MALI_SEC_HWCNT
-	/* SEC_HWCNT doesn't use vinstr_ctx thread. it use legacy hwcnt vinstr_ctx */
-	return 0;
-#endif
 
 	vinstr_ctx->thread = kthread_run(
 			kbasep_vinstr_service_task,
@@ -410,12 +409,6 @@ static struct kbase_vinstr_client *kbasep_vinstr_attach_client(
 	cli->accum_buffer = kzalloc(cli->dump_size, GFP_KERNEL);
 	if (!cli->accum_buffer)
 		goto error;
-
-#ifdef MALI_SEC_HWCNT
-	/* SEC_HWCNT doesn't have buffer counter. It only use 1 buffer to dump */
-	if (cli->dump_buffers == 0 && buffer_count == 0)
-		cli->dump_buffers = (void *)(uintptr_t)vinstr_ctx->cpu_va;
-#endif
 
 	/* Prepare buffers. */
 	if (cli->buffer_count) {
@@ -959,6 +952,7 @@ static enum hrtimer_restart kbasep_vinstr_wake_up_callback(
 
 	return HRTIMER_NORESTART;
 }
+
 /**
  * kbasep_vinstr_service_task - HWC dumping service thread
  *
@@ -1075,6 +1069,7 @@ static int kbasep_vinstr_service_task(void *data)
 
 	return 0;
 }
+
 /*****************************************************************************/
 
 /**
@@ -1476,14 +1471,9 @@ struct kbase_vinstr_context *kbase_vinstr_init(struct kbase_device *kbdev)
 	vinstr_ctx->kbdev = kbdev;
 	vinstr_ctx->thread = NULL;
 
-#ifdef MALI_SEC_HWCNT
-	kbdev->hwcnt.is_hwcnt_attach = false;
-	kbdev->hwcnt.is_hwcnt_force_stop = false;
-	kbdev->hwcnt.timeout = (unsigned int)msecs_to_jiffies(100);
-#endif
-
 	atomic_set(&vinstr_ctx->request_pending, 0);
 	init_waitqueue_head(&vinstr_ctx->waitq);
+
 	return vinstr_ctx;
 }
 
@@ -1613,13 +1603,6 @@ int kbase_vinstr_hwc_dump(struct kbase_vinstr_client *cli,
 		if (rcode)
 			goto exit;
 
-#ifdef MALI_SEC_HWCNT
-		if (cli->buffer_count == 0) {
-			mutex_unlock(&vinstr_ctx->lock);
-			return 0;
-		}
-#endif
-
 		rcode = kbasep_vinstr_update_client(cli, timestamp, event_id);
 		if (rcode)
 			goto exit;
@@ -1695,41 +1678,3 @@ void kbase_vinstr_hwc_resume(struct kbase_vinstr_context *vinstr_ctx)
 	wake_up_all(&vinstr_ctx->waitq);
 	mutex_unlock(&vinstr_ctx->lock);
 }
-
-
-#ifdef MALI_SEC_HWCNT
-struct kbase_vinstr_client *kbasep_vinstr_attach_client_sec(
-		struct kbase_vinstr_context *vinstr_ctx, u32 buffer_count,
-		u32 bitmap[4], void *argp)
-{
-	return kbasep_vinstr_attach_client(vinstr_ctx, buffer_count, bitmap, argp);
-}
-void kbasep_vinstr_detach_client_sec(struct kbase_vinstr_client *cli)
-{
-	kbasep_vinstr_detach_client(cli);
-}
-int kbase_vinstr_enable(struct kbase_vinstr_context *ctx)
-{
-	struct kbase_uk_hwcnt_setup setup;
-	struct exynos_context *platform;
-
-	platform = (struct exynos_context *) ctx->kbdev->platform_context;
-
-	setup.dump_buffer = ctx->gpu_va;
-	setup.jm_bm = platform->hwcnt_choose_jm;
-	setup.tiler_bm = platform->hwcnt_choose_tiler;
-	setup.shader_bm = platform->hwcnt_choose_shader;
-	setup.mmu_l2_bm = platform->hwcnt_choose_mmu_l2;
-
-	return kbase_instr_hwcnt_enable_internal(ctx->kbdev, ctx->kctx, &setup);
-}
-
-void kbase_vinstr_disable(struct kbase_vinstr_context *ctx)
-{
-	kbase_instr_hwcnt_disable_internal(ctx->kctx);
-}
-void *kbase_vinstr_get_addr(struct kbase_device *kbdev)
-{
-	return kbdev->vinstr_ctx->cpu_va;
-}
-#endif

@@ -135,15 +135,9 @@ static int kbase_dump_cpu_gpu_time(struct kbase_jd_atom *katom)
 static void complete_soft_job(struct kbase_jd_atom *katom)
 {
 	struct kbase_context *kctx = katom->kctx;
-/* MALI_SEC_INTEGRATION */
-	struct list_head *entry = (struct list_head *)&katom->dep_item[0];
 
 	mutex_lock(&kctx->jctx.lock);
-/* MALI_SEC_INTEGRATION */
-	/* Do not delete from list if item was removed already */
-	if (!(entry->prev == LIST_POISON2 || entry->next == LIST_POISON1))
-		list_del(&katom->dep_item[0]);
-
+	list_del(&katom->dep_item[0]);
 	kbase_finish_soft_job(katom);
 	if (jd_done_nolock(katom, NULL))
 		kbase_js_sched_all(kctx->kbdev);
@@ -176,9 +170,7 @@ static enum base_jd_event_code kbase_fence_trigger(struct kbase_jd_atom *katom, 
 		return BASE_JD_EVENT_JOB_CANCELLED;
 	}
 
-	/* MALI_SEC_INTEGRATION */
-	//kbase_sync_signal_pt(pt, result);
-	kbase_sync_signal_pt(pt, 0);
+	kbase_sync_signal_pt(pt, result);
 
 	sync_timeline_signal(timeline);
 
@@ -245,15 +237,6 @@ static int kbase_fence_wait(struct kbase_jd_atom *katom)
 	} else if (ret < 0) {
 		goto cancel_atom;
 	}
-/* MALI_SEC_INTEGRATION */
-{
-	struct kbase_context *kctx = katom->kctx;
-	struct kbase_device *kbdev = kctx->kbdev;
-
-	if(kbdev->vendor_callbacks->fence_timer_init)
-		kbdev->vendor_callbacks->fence_timer_init(katom);
-}
-
 	return 1;
 
  cancel_atom:
@@ -285,8 +268,6 @@ static void kbase_fence_cancel_wait(struct kbase_jd_atom *katom)
 
 int kbase_process_soft_job(struct kbase_jd_atom *katom)
 {
-	unsigned long flags;
-
 	switch (katom->core_req & BASEP_JD_REQ_ATOM_TYPE) {
 	case BASE_JD_REQ_SOFT_DUMP_CPU_GPU_TIME:
 		return kbase_dump_cpu_gpu_time(katom);
@@ -296,25 +277,13 @@ int kbase_process_soft_job(struct kbase_jd_atom *katom)
 		katom->event_code = kbase_fence_trigger(katom, katom->event_code == BASE_JD_EVENT_DONE ? 0 : -EFAULT);
 		/* Release the reference as we don't need it any more */
 		sync_fence_put(katom->fence);
-/* MALI_SEC_INTEGRATION */
-		spin_lock_irqsave(&katom->fence_lock, flags);
 		katom->fence = NULL;
-		spin_unlock_irqrestore(&katom->fence_lock, flags);
 		break;
 	case BASE_JD_REQ_SOFT_FENCE_WAIT:
 		return kbase_fence_wait(katom);
 #endif				/* CONFIG_SYNC */
 	case BASE_JD_REQ_SOFT_REPLAY:
 		return kbase_replay_process(katom);
-#ifdef CONFIG_MALI_DVFS_USER
-	case BASE_JD_REQ_SOFT_DVFS:
-		if(katom->kctx->kbdev->vendor_callbacks->dvfs_process_job) {
-			if (katom->kctx->kbdev->vendor_callbacks->dvfs_process_job(katom)) {
-				katom->event_code = BASE_JD_EVENT_DVFS_EVENT;
-			}
-		}
-		break;
-#endif
 	}
 
 	/* Atom is complete */
@@ -323,25 +292,10 @@ int kbase_process_soft_job(struct kbase_jd_atom *katom)
 
 void kbase_cancel_soft_job(struct kbase_jd_atom *katom)
 {
-/* MALI_SEC_INTEGRATION */
-	pgd_t *pgd;
-	struct mm_struct *mm = katom->kctx->process_mm;
-
-	pgd = pgd_offset(mm, (unsigned long)katom);
-	if (pgd_none(*pgd) || pgd_bad(*pgd)) {
-		printk("Abnormal katom\n");
-		printk("katom->kctx: 0x%p, katom->kctx->tgid: %d, katom->kctx->process_mm: 0x%p, pgd: 0x%px\n", katom->kctx, katom->kctx->tgid, katom->kctx->process_mm, pgd);
-		return;
-	}
-
 	switch (katom->core_req & BASEP_JD_REQ_ATOM_TYPE) {
 #ifdef CONFIG_SYNC
 	case BASE_JD_REQ_SOFT_FENCE_WAIT:
 		kbase_fence_cancel_wait(katom);
-		break;
-#endif
-#ifdef CONFIG_MALI_DVFS_USER
-	case BASE_JD_REQ_SOFT_DVFS:
 		break;
 #endif
 	default:
@@ -352,8 +306,6 @@ void kbase_cancel_soft_job(struct kbase_jd_atom *katom)
 
 int kbase_prepare_soft_job(struct kbase_jd_atom *katom)
 {
-	unsigned long flags;
-
 	switch (katom->core_req & BASEP_JD_REQ_ATOM_TYPE) {
 	case BASE_JD_REQ_SOFT_DUMP_CPU_GPU_TIME:
 		{
@@ -383,9 +335,7 @@ int kbase_prepare_soft_job(struct kbase_jd_atom *katom)
 			}
 			fence.basep.fd = fd;
 			if (0 != copy_to_user((__user void *)(uintptr_t) katom->jc, &fence, sizeof(fence))) {
-				spin_lock_irqsave(&katom->fence_lock, flags);
 				katom->fence = NULL;
-				spin_unlock_irqrestore(&katom->fence_lock, flags);
 				sys_close(fd);
 				return -EINVAL;
 			}
@@ -407,10 +357,6 @@ int kbase_prepare_soft_job(struct kbase_jd_atom *katom)
 #endif				/* CONFIG_SYNC */
 	case BASE_JD_REQ_SOFT_REPLAY:
 		break;
-#ifdef CONFIG_MALI_DVFS_USER
-	case BASE_JD_REQ_SOFT_DVFS:
-		break;
-#endif
 	default:
 		/* Unsupported soft-job */
 		return -EINVAL;
@@ -420,8 +366,6 @@ int kbase_prepare_soft_job(struct kbase_jd_atom *katom)
 
 void kbase_finish_soft_job(struct kbase_jd_atom *katom)
 {
-	unsigned long flags;
-
 	switch (katom->core_req & BASEP_JD_REQ_ATOM_TYPE) {
 	case BASE_JD_REQ_SOFT_DUMP_CPU_GPU_TIME:
 		/* Nothing to do */
@@ -433,42 +377,15 @@ void kbase_finish_soft_job(struct kbase_jd_atom *katom)
 			kbase_fence_trigger(katom, katom->event_code ==
 					BASE_JD_EVENT_DONE ? 0 : -EFAULT);
 			sync_fence_put(katom->fence);
-
-			spin_lock_irqsave(&katom->fence_lock, flags);
 			katom->fence = NULL;
-			spin_unlock_irqrestore(&katom->fence_lock, flags);
 		}
 		break;
 	case BASE_JD_REQ_SOFT_FENCE_WAIT:
-/* MALI_SEC_INTEGRATION */
-#ifdef MALI_SEC_FENCE_INTEGRATION
-		if (katom->fence) {
-			sync_fence_put(katom->fence);
-			spin_lock_irqsave(&katom->fence_lock, flags);
-			katom->fence = NULL;
-			spin_unlock_irqrestore(&katom->fence_lock, flags);
-		}
-
-		{
-			struct kbase_context *kctx = katom->kctx;
-			struct kbase_device *kbdev = kctx->kbdev;
-
-			if(kbdev->vendor_callbacks->fence_del_timer)
-				kbdev->vendor_callbacks->fence_del_timer(katom);
-		}
-#else
 		/* Release the reference to the fence object */
 		sync_fence_put(katom->fence);
-		spin_lock_irqsave(&katom->fence_lock, flags);
 		katom->fence = NULL;
-		spin_unlock_irqrestore(&katom->fence_lock, flags);
-#endif
 		break;
 #endif				/* CONFIG_SYNC */
-#ifdef CONFIG_MALI_DVFS_USER
-	case BASE_JD_REQ_SOFT_DVFS:
-		break;
-#endif
 	}
 }
 

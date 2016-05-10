@@ -29,8 +29,7 @@
  * @return 0 if successfully prints data in debugfs entry file
  *         -1 if it encountered an error
  */
-extern int gpu_memory_seq_show(struct seq_file *sfile, void *data);
-#ifdef MALI_SEC_INTEGRATION
+
 static int kbasep_gpu_memory_seq_show(struct seq_file *sfile, void *data)
 {
 	ssize_t ret = 0;
@@ -61,13 +60,13 @@ static int kbasep_gpu_memory_seq_show(struct seq_file *sfile, void *data)
 	kbase_dev_list_put(kbdev_list);
 	return ret;
 }
-#endif
+
 /*
  *  File operations related to debugfs entry for gpu_memory
  */
 static int kbasep_gpu_memory_debugfs_open(struct inode *in, struct file *file)
 {
-	return single_open(file, gpu_memory_seq_show , NULL);
+	return single_open(file, kbasep_gpu_memory_seq_show , NULL);
 }
 
 static const struct file_operations kbasep_gpu_memory_debugfs_fops = {

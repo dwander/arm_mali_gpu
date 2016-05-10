@@ -167,19 +167,6 @@ void kbase_job_hw_submit(struct kbase_device *kbdev,
 			katom,
 			&kbdev->gpu_props.props.raw_props.js_features[js]);
 #endif
-
-/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
-#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
-    /** printing out dependency information between jobs */
-    kbase_systrace_mali_job_slots_event(SYSTRACE_EVENT_TYPE_START, js, kctx, kbase_jd_atom_id(kctx, katom), ktime_to_ns(katom->start_timestamp),
-                                        katom->kbase_atom_dep_systrace[0].dep_atom_id,
-                                        katom->kbase_atom_dep_systrace[0].dep_atom_dependency_type,
-                                        katom->kbase_atom_dep_systrace[1].dep_atom_id,
-                                        katom->kbase_atom_dep_systrace[1].dep_atom_dependency_type,
-                                        katom->gles_ctx_handle);
-#endif
-/* SRUK-MALI_SYSTRACE_SUPPORT }*/
-
 #ifdef CONFIG_GPU_TRACEPOINTS
 	if (kbase_backend_nr_atoms_submitted(kbdev, js) == 1) {
 		/* If this is the only job on the slot, trace it as starting */
@@ -301,14 +288,6 @@ void kbase_job_done(struct kbase_device *kbdev, u32 done)
 						GATOR_JOB_SLOT_SOFT_STOPPED, i),
 								NULL, 0);
 #endif
-
-/*{ SRUK-MALI_SYSTRACE_SUPPORT*/
-#ifdef CONFIG_MALI_SYSTRACE_SUPPORT
-                    kbase_systrace_mali_job_slots_event(SYSTRACE_EVENT_TYPE_STOP, i, NULL, 0, 0, 0, 0, 0, 0, 0);
-
-#endif
-/* SRUK-MALI_SYSTRACE_SUPPORT }*/
-
 #if defined(CONFIG_MALI_MIPE_ENABLED)
 					kbase_tlstream_aux_job_softstop(i);
 #endif
@@ -331,9 +310,6 @@ void kbase_job_done(struct kbase_device *kbdev, u32 done)
 						BASE_JD_EVENT_TERMINATED;
 					/* fall through */
 				default:
-					/* MALI_SEC_INTEGRATION */
-					if(kbdev->vendor_callbacks->update_status)
-						kbdev->vendor_callbacks->update_status(kbdev, "completion_code", completion_code);
 					dev_warn(kbdev->dev, "error detected from slot %d, job status 0x%08x (%s)",
 							i, completion_code,
 							kbase_exception_name
@@ -835,9 +811,7 @@ void kbase_jm_wait_for_zero_jobs(struct kbase_context *kctx)
 	/* Wait for all jobs to finish, and for the context to be not-scheduled
 	 * (due to kbase_job_zap_context(), we also guarentee it's not in the JS
 	 * policy queue either */
-	/* MALI_SEC_INTEGRATION */
-	wait_event_timeout(kctx->jctx.zero_jobs_wait,
-			kctx->jctx.job_nr == 0, (unsigned int) msecs_to_jiffies(300));
+	wait_event(kctx->jctx.zero_jobs_wait, kctx->jctx.job_nr == 0);
 	wait_event(kctx->jctx.sched_info.ctx.is_scheduled_wait,
 			kctx->jctx.sched_info.ctx.is_scheduled == false);
 
@@ -1149,12 +1123,6 @@ static void kbase_debug_dump_registers(struct kbase_device *kbdev)
 		kbase_reg_read(kbdev, GPU_CONTROL_REG(L2_MMU_CONFIG), NULL));
 }
 
-/* MALI_SEC_INTEGRATION */
-void gpu_dump_register_hooks(struct kbase_device *kbdev)
-{
-	kbase_debug_dump_registers(kbdev);
-}
-
 static void kbasep_save_hwcnt_setup(struct kbase_device *kbdev,
 				struct kbase_context *kctx,
 				struct kbase_uk_hwcnt_setup *hwcnt_setup)
@@ -1252,11 +1220,6 @@ static void kbasep_reset_timeout_worker(struct work_struct *data)
 	 * debugging of GPU resets */
 	kbase_debug_dump_registers(kbdev);
 
-	/* MALI_SEC_INTEGRATION */
-	if(kbdev->vendor_callbacks->register_dump)
-		kbdev->vendor_callbacks->register_dump();
-	KBASE_TRACE_DUMP(kbdev);
-
 	bckp_state = kbdev->hwcnt.backend.state;
 	kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_RESETTING;
 	kbdev->hwcnt.backend.triggered = 0;
@@ -1270,11 +1233,6 @@ static void kbasep_reset_timeout_worker(struct work_struct *data)
 	/* Ensure that any IRQ handlers have finished
 	 * Must be done without any locks IRQ handlers will take */
 	kbase_synchronize_irqs(kbdev);
-
-	/* MALI_SEC_INTEGRATION */
-	/* while the GPU initialization, vendor desired gpu log will be out by set_power_dbg(TRUE) calls */
-	if(kbdev->vendor_callbacks->set_poweron_dbg)
-		kbdev->vendor_callbacks->set_poweron_dbg(true);
 
 	/* Reset the GPU */
 	kbase_pm_init_hw(kbdev, 0);
@@ -1406,11 +1364,6 @@ static void kbasep_reset_timeout_worker(struct work_struct *data)
 	spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
 	/* Note: counter dumping may now resume */
 
-	/* MALI_SEC_INTEGRATION */
-	if(kbdev->vendor_callbacks->update_status)
-		kbdev->vendor_callbacks->update_status(kbdev, "reset_count", 0);
-
-
 	mutex_lock(&kbdev->pm.lock);
 
 	/* Find out what cores are required now */
@@ -1428,13 +1381,6 @@ static void kbasep_reset_timeout_worker(struct work_struct *data)
 									0);
 		kbase_js_sched_all(kbdev);
 	}
-
-#ifdef MALI_SEC_HWCNT
-	mutex_lock(&kbdev->hwcnt.mlock);
-	if(kbdev->vendor_callbacks->hwcnt_disable)
-		kbdev->vendor_callbacks->hwcnt_disable(kbdev);
-	mutex_unlock(&kbdev->hwcnt.mlock);
-#endif
 
 	kbase_pm_context_idle(kbdev);
 	KBASE_TRACE_ADD(kbdev, JM_END_RESET_WORKER, NULL, NULL, 0u, 0);
